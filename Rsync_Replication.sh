@@ -37,6 +37,15 @@ rsync_type="incremental" # Can be "incremental" or "mirror"
 rsync_mode="push"  # Can be "push" or "pull"
 
 ####################
+# Rsync flags (user-defined)
+# - rsync_shortargs: Short rsync arguments (e.g., "-a", "-v", "-z").
+# - rsync_longargs: Long rsync arguments (e.g., "--delete", "--checksum").
+# - These flags will be applied based on the replication type.
+####################
+rsync_shortargs="-azv" # Default: archive mode, compress, verbose
+rsync_longargs="--delete" # Default: delete files on destination if not present on source
+
+####################
 # Remote replication variables
 # - remote_replication: Can be "yes" for remote replication or "no" for local replication.
 # - remote_user: Username for remote server.
@@ -196,11 +205,17 @@ rsync_replication() {
         fi
     fi
 
+    # Rsync flags to speed up remote replication
+    local rsync_flags="$rsync_shortargs $rsync_longargs $link_dest_option"
+    if [ "$remote_replication" = "yes" ]; then
+        rsync_flags="$rsync_flags --partial --checksum"
+    fi
+
     # Rsync for push mode (local to remote)
     if [ "$rsync_mode" = "push" ]; then
         if [ "$remote_replication" = "yes" ]; then
             ssh "${remote_user}@${remote_server}" "mkdir -p \"${destination}\""
-            if rsync -azvh --delete $link_dest_option -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"; then
+            if rsync $rsync_flags -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"; then
                 log_message "Rsync ${rsync_type} push replication was successful to remote destination: ${remote_user}@${remote_server}:${destination}"
             else
                 log_message "Rsync push replication failed to remote destination: ${remote_user}@${remote_server}:${destination}"
@@ -208,7 +223,7 @@ rsync_replication() {
             fi
         else
             # Local-only replication
-            if rsync -azvh --delete $link_dest_option "${source_directory}/" "${destination}/"; then
+            if rsync $rsync_flags "${source_directory}/" "${destination}/"; then
                 log_message "Rsync ${rsync_type} local replication was successful to local destination: ${destination}"
             else
                 log_message "Rsync local replication failed to local destination: ${destination}"
@@ -224,7 +239,7 @@ rsync_replication() {
                 return 1
             fi
             ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\""
-            if rsync -azvh --delete $link_dest_option -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"; then
+            if rsync $rsync_flags -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"; then
                 log_message "Rsync ${rsync_type} pull replication was successful from remote source: ${remote_user}@${remote_server}:${source_directory} to local destination: ${destination}"
             else
                 log_message "Rsync pull replication failed from remote source: ${remote_user}@${remote_server}:${source_directory} to local destination: ${destination}"
