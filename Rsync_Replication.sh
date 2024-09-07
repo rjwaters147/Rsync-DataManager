@@ -12,11 +12,11 @@
 
 ####################
 # Source for replication (local if push, remote if pull)
-# - This is the directory from where files will be synced.
-# - In push mode: it's the local source.
-# - In pull mode: it's the remote source.
+# - These are the directories from where files will be synced.
+# - In push mode: they're the local sources.
+# - In pull mode: they're the remote sources.
 ####################
-source_directory="/path/to/source/directory" # (e.g., /mnt/data)
+source_directories=("/path/to/source/directory1" "/path/to/source/directory2") # Multiple directories (e.g., /mnt/data1 /mnt/data2)
 
 ####################
 # Destination for replication (local if pull, remote if push)
@@ -90,13 +90,15 @@ pre_run_checks() {
         fi
     }
 
-    # Check if the source directory exists (for push only)
-    check_source_directory() {
+    # Check if each source directory exists (for push only)
+    check_source_directories() {
         if [ "$rsync_mode" = "push" ]; then
-            if [ ! -d "$source_directory" ]; then
-                log_message "Source directory ${source_directory} does not exist. Exiting."
-                exit 1
-            fi
+            for source_directory in "${source_directories[@]}"; do
+                if [ ! -d "$source_directory" ]; then
+                    log_message "Source directory ${source_directory} does not exist. Exiting."
+                    exit 1
+                fi
+            done
         else
             log_message "Skipping source directory check for pull mode."
         fi
@@ -128,7 +130,7 @@ pre_run_checks() {
 
     # Execute all checks
     check_rsync_installed
-    check_source_directory
+    check_source_directories
     check_destination_directory
     check_ssh_connection
 }
@@ -148,13 +150,12 @@ get_previous_backup() {
 }
 
 ####################
-# Perform rsync replication (push or pull)
+# Perform rsync replication (push or pull) for a single source directory
 # - This function handles both push (local to remote) and pull (remote to local) rsync operations.
 # - It calls pre_run_checks to ensure that all necessary checks are performed before running rsync.
 ####################
-rsync_replication() {
-    # Perform pre-run checks before the replication starts
-    pre_run_checks
+rsync_replication_single_source() {
+    local source_directory="$1"
 
     get_previous_backup
 
@@ -195,6 +196,7 @@ rsync_replication() {
             log_message "Error: source directory is not set for pull mode."
             return 1
         fi
+        # shellcheck disable=SC2029
         ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\""
         if rsync -azvh --delete $link_dest_option -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"; then
             log_message "Rsync ${rsync_type} pull replication was successful from remote source: ${remote_user}@${remote_server}:${source_directory} to local destination: ${destination}"
@@ -206,6 +208,18 @@ rsync_replication() {
 }
 
 ####################
+# Perform rsync replication for multiple source directories
+####################
+run_for_each_source() {
+    # Loop through each source directory and perform rsync
+    for source_directory in "${source_directories[@]}"; do
+        log_message "Starting replication for source directory: ${source_directory}"
+        rsync_replication_single_source "$source_directory"
+    done
+}
+
+####################
 # Main Script Execution
 ####################
-rsync_replication
+pre_run_checks
+run_for_each_source
