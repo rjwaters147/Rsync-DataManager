@@ -58,7 +58,7 @@ log_file="/path/to/logfile.log" # Path to log file (e.g., /var/log/rsync_replica
 ####################
 
 ####################
-# Logging function
+# Funtction: log_message
 # - This function is used to log messages with timestamps to the log file and console.
 # - It creates the destination directory for the log file if it doesn't exist.
 # - It appends to the log file if it already exists.
@@ -146,7 +146,7 @@ pre_run_checks() {
 }
 
 ####################
-# Get the previous backup for incremental rsync (if applicable)
+# Function: get_previous_backup
 # - This function sets the previous_backup variable to the most recent backup directory.
 # - If remote replication is disabled, it performs local backup lookup.
 ####################
@@ -166,7 +166,7 @@ get_previous_backup() {
 }
 
 ####################
-# Perform rsync replication (push or pull) for a single source directory
+# Function: rsync_replication
 # - This function handles both push (local to remote) and pull (remote to local) rsync operations.
 # - It calls pre_run_checks to ensure that all necessary checks are performed before running rsync.
 ####################
@@ -199,7 +199,7 @@ rsync_replication() {
     # Rsync for push mode (local to remote)
     if [ "$rsync_mode" = "push" ]; then
         if [ "$remote_replication" = "yes" ]; then
-            ssh "${remote_user}@${remote_server}" "mkdir -p \"\${destination}\""
+            ssh "${remote_user}@${remote_server}" "mkdir -p \"${destination}\""
             if rsync -azvh --delete $link_dest_option -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"; then
                 log_message "Rsync ${rsync_type} push replication was successful to remote destination: ${remote_user}@${remote_server}:${destination}"
             else
@@ -238,7 +238,8 @@ rsync_replication() {
 }
 
 ####################
-# Perform rsync replication for multiple source directories
+# Function: run_for_each_source
+# - This function loops through each source directory and performs rsync replication.
 ####################
 run_for_each_source() {
     # Loop through each source directory and perform rsync
@@ -246,6 +247,7 @@ run_for_each_source() {
         log_message "Starting replication for source directory: ${source_directory}"
         rsync_replication "$source_directory"
     done
+    log_message "Replication completed for all source directories."
 }
 
 ####################
