@@ -13,6 +13,7 @@
 ####################
 # Source for replication (local if push, remote if pull)
 # - These are the directories from where files will be synced.
+# - Note: This should be the full path to the source directories.
 # - In push mode: they're the local sources.
 # - In pull mode: they're the remote sources.
 ####################
@@ -21,6 +22,7 @@ source_directories=("/path/to/source/directory1" "/path/to/source/directory2") #
 ####################
 # Destination for replication (local if pull, remote if push)
 # - This is the directory to where files will be synced.
+# - Note: This should be the full path to the destination directory.
 # - In push mode: it's the remote destination.
 # - In pull mode: it's the local destination.
 ####################
