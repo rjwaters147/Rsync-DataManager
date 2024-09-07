@@ -198,7 +198,6 @@ rsync_replication_single_source() {
             log_message "Error: source directory is not set for pull mode."
             return 1
         fi
-        # shellcheck disable=SC2029
         ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\""
         if rsync -azvh --delete $link_dest_option -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"; then
             log_message "Rsync ${rsync_type} pull replication was successful from remote source: ${remote_user}@${remote_server}:${source_directory} to local destination: ${destination}"
