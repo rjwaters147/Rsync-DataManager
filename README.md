@@ -1,6 +1,6 @@
 # Rsync DataManager
 
-This script synchronizes files between a local machine and a remote server using `rsync`. It supports both push (local to remote) and pull (remote to local) operations, and allows for incremental or full replication.
+This script synchronizes files between a local machine and a remote server using Rsync. It supports both push (local to remote) and pull (remote to local) operations, and allows for incremental or full replication.
 
 ## Features
 
@@ -13,7 +13,7 @@ This script synchronizes files between a local machine and a remote server using
 
 ## Requirements
 
-- `rsync` installed on both the local and remote systems.
+- Rsync installed on both the local and remote systems.
 - SSH access to the remote server.
 
 ## Configuration
