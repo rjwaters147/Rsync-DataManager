@@ -1,4 +1,4 @@
-# Rsync Replication Script
+# Rsync DataManager
 
 This script synchronizes files between a local machine and a remote server using `rsync`. It supports both push (local to remote) and pull (remote to local) operations, and allows for incremental or full replication.
 
