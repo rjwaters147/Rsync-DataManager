@@ -17,7 +17,7 @@
 # - In push mode: they're the local sources.
 # - In pull mode: they're the remote sources.
 ####################
-source_directories=("/path/to/source/directory1" "/path/to/source/directory2") # Multiple directories (e.g., /mnt/data1 /mnt/data2)
+source_directories=("/path/to/source/directory1" "/path/to/source/directory2") # Can be one or multiple directories (e.g., "/mnt/data1" "/mnt/data2")
 
 ####################
 # Destination for replication (local if pull, remote if push)
@@ -26,7 +26,7 @@ source_directories=("/path/to/source/directory1" "/path/to/source/directory2") #
 # - In push mode: it's the remote destination.
 # - In pull mode: it's the local destination.
 ####################
-destination_directory="/path/to/destination/directory" # (e.g., /mnt/backup)
+destination_directory="/path/to/destination/directory" # (e.g., "/mnt/backup")
 
 ####################
 # Rsync replication variables
