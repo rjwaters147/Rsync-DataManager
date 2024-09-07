@@ -49,83 +49,113 @@ remote_server="remote_server_address" # IP or hostname (e.g., 192.168.1.10)
 log_file="/path/to/logfile.log" # Path to log file (e.g., /var/log/rsync_replication.log)
 
 ####################
+# Main Script
+####################
+
+####################
 # Logging function
 # - This function is used to log messages with timestamps to the log file and console.
+# - It creates the destination directory for the log file if it doesn't exist.
+# - It appends to the log file if it already exists.
 ####################
 log_message() {
     local message="$1"
+
+    # Extract the directory from the log file path
+    local log_dir
+    log_dir=$(dirname "$log_file")
+
+    # Check if the log directory exists, and create it if it doesn't
+    if [ ! -d "$log_dir" ]; then
+        if mkdir -p "$log_dir"; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Failed to create log directory: $log_dir"
+            exit 1
+        fi
+    fi
+
+    # Log the message with a timestamp and append it to the log file
     echo "$(date '+%Y-%m-%d %H:%M:%S') - ${message}" | tee -a "$log_file"
 }
 
 ####################
-# Check if rsync is installed
+# Function: pre_run_checks
+# - Ensures that rsync is installed and that the source and destination directories exist.
 ####################
-check_rsync_installed() {
-    if ! command -v rsync >/dev/null 2>&1; then
-        log_message "Rsync is not installed. Exiting."
-        exit 1
-    fi
-}
-
-####################
-# Check if the source directory exists (for push only)
-####################
-check_source_directory() {
-    if [ "$rsync_mode" = "push" ]; then
-        if [ ! -d "$source_directory" ]; then
-            log_message "Source directory ${source_directory} does not exist. Exiting."
+pre_run_checks() {
+    # Check if rsync is installed
+    check_rsync_installed() {
+        if ! command -v rsync >/dev/null 2>&1; then
+            log_message "Rsync is not installed. Exiting."
             exit 1
         fi
-    else
-        log_message "Skipping source directory check for pull mode."
-    fi
-}
+    }
 
-####################
-# Check if the destination directory exists (for push or pull)
-####################
-check_destination_directory() {
-    if [ ! -d "$destination_directory" ]; then
-        log_message "Destination directory ${destination_directory} does not exist locally. Creating it."
-        if ! mkdir -p "$destination_directory"; then
-            log_message "Failed to create local destination directory ${destination_directory}. Exiting."
+    # Check if the source directory exists (for push only)
+    check_source_directory() {
+        if [ "$rsync_mode" = "push" ]; then
+            if [ ! -d "$source_directory" ]; then
+                log_message "Source directory ${source_directory} does not exist. Exiting."
+                exit 1
+            fi
+        else
+            log_message "Skipping source directory check for pull mode."
+        fi
+    }
+
+    # Check if the destination directory exists (for push or pull)
+    check_destination_directory() {
+        if [ ! -d "$destination_directory" ]; then
+            log_message "Destination directory ${destination_directory} does not exist locally. Creating it."
+            if ! mkdir -p "$destination_directory"; then
+                log_message "Failed to create local destination directory ${destination_directory}. Exiting."
+                exit 1
+            else
+                log_message "Successfully created local destination directory ${destination_directory}."
+            fi
+        fi
+    }
+
+    # Check SSH connection if needed (for remote replication)
+    check_ssh_connection() {
+        log_message "Checking SSH connection to ${remote_user}@${remote_server}..."
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${remote_user}@${remote_server}" "exit" 2>/dev/null; then
+            log_message "SSH connection to ${remote_user}@${remote_server} failed. Exiting."
             exit 1
         else
-            log_message "Successfully created local destination directory ${destination_directory}."
+            log_message "SSH connection to ${remote_user}@${remote_server} is successful."
         fi
-    fi
-}
+    }
 
-####################
-# Check SSH connection if needed (for remote replication)
-####################
-check_ssh_connection() {
-    log_message "Checking SSH connection to ${remote_user}@${remote_server}..."
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${remote_user}@${remote_server}" "exit" 2>/dev/null; then
-        log_message "SSH connection to ${remote_user}@${remote_server} failed. Exiting."
-        exit 1
-    else
-        log_message "SSH connection to ${remote_user}@${remote_server} is successful."
-    fi
+    # Execute all checks
+    check_rsync_installed
+    check_source_directory
+    check_destination_directory
+    check_ssh_connection
 }
 
 ####################
 # Get the previous backup for incremental rsync (if applicable)
+# - This function sets the previous_backup variable to the most recent backup directory.
 ####################
 get_previous_backup() {
     if [ "$rsync_type" = "incremental" ]; then
         if [ "$rsync_mode" = "push" ]; then
-            previous_backup=$(ssh "${remote_user}@${remote_server}" "ls \"\${destination_directory}\" | sort -r | head -n 2 | tail -n 1")
+            previous_backup=$(ssh "${remote_user}@${remote_server}" "ls \"${destination_directory}\" | sort -r | head -n 2 | tail -n 1")
         else
-            previous_backup=$(find "${destination_directory}" -maxdepth 1 -type d -printf '%f\n' | sort -r | head -n 2 | tail -n 1)
+            previous_backup=$(find "${destination_directory}" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -r | head -n 1)
         fi
     fi
 }
 
 ####################
 # Perform rsync replication (push or pull)
+# - This function handles both push (local to remote) and pull (remote to local) rsync operations.
+# - It calls pre_run_checks to ensure that all necessary checks are performed before running rsync.
 ####################
 rsync_replication() {
+    # Perform pre-run checks before the replication starts
+    pre_run_checks
+
     get_previous_backup
 
     # Determine the destination based on rsync type
@@ -141,14 +171,18 @@ rsync_replication() {
     if [ -n "$previous_backup" ]; then
         link_dest_path="${destination_directory}/${previous_backup}"
         if [ "$rsync_type" = "incremental" ]; then
-            link_dest_option="--link-dest=${link_dest_path}"
+            if [ -d "$link_dest_path" ]; then
+                link_dest_option="--link-dest=${link_dest_path}"
+            else
+                log_message "Warning: --link-dest arg does not exist: ${link_dest_path}, skipping link-dest option."
+            fi
         fi
     fi
 
     # Rsync for push mode (local to remote)
     if [ "$rsync_mode" = "push" ]; then
         ssh "${remote_user}@${remote_server}" "mkdir -p \"\${destination}\""
-        if rsync -azvh --delete "$link_dest_option" -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"; then
+        if rsync -azvh --delete $link_dest_option -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"; then
             log_message "Rsync ${rsync_type} push replication was successful to remote destination: ${remote_user}@${remote_server}:${destination}"
         else
             log_message "Rsync push replication failed to remote destination: ${remote_user}@${remote_server}:${destination}"
@@ -157,8 +191,12 @@ rsync_replication() {
 
     # Rsync for pull mode (remote to local)
     elif [ "$rsync_mode" = "pull" ]; then
-        ssh "${remote_user}@${remote_server}" "ls \"\${source_directory}\""
-        if rsync -azvh --delete "$link_dest_option" -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"; then
+        if [ -z "$source_directory" ]; then
+            log_message "Error: source directory is not set for pull mode."
+            return 1
+        fi
+        ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\""
+        if rsync -azvh --delete $link_dest_option -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"; then
             log_message "Rsync ${rsync_type} pull replication was successful from remote source: ${remote_user}@${remote_server}:${source_directory} to local destination: ${destination}"
         else
             log_message "Rsync pull replication failed from remote source: ${remote_user}@${remote_server}:${source_directory} to local destination: ${destination}"
@@ -170,8 +208,4 @@ rsync_replication() {
 ####################
 # Main Script Execution
 ####################
-check_rsync_installed
-check_source_directory
-check_destination_directory
-check_ssh_connection
 rsync_replication
