@@ -38,12 +38,13 @@ rsync_mode="push"  # Can be "push" or "pull"
 
 ####################
 # Rsync flags (user-defined)
-# - rsync_shortargs: Short rsync arguments (e.g., "-a", "-v", "-z").
-# - rsync_longargs: Long rsync arguments (e.g., "--delete", "--checksum").
+# - rsync_short_args: Short rsync arguments (e.g., "-a", "-v", "-z").
+# - rsync_long_args: Long rsync arguments (e.g., "--delete", "--checksum").
+# - Note: If rsync_type is set to incremental --link_dest will be added automatically
 # - These flags will be applied based on the replication type.
 ####################
-rsync_shortargs="-azv" # Default: archive mode, compress, verbose
-rsync_longargs="--delete" # Default: delete files on destination if not present on source
+rsync_short_args="-avzH" # Suggested defaults
+rsync_long_args="--delete --numeric-ids --delete-excluded --delete-missing-args --checksum" # Suggested defaults
 
 ####################
 # Remote replication variables
@@ -93,24 +94,53 @@ log_message() {
 
 ####################
 # Function: pre_run_checks
-# - Ensures that rsync is installed and that the source and destination directories exist.
-# - Checks SSH connection if remote replication is enabled.
+# - Collection of checks to run before proceeding to execute the script
 ####################
 pre_run_checks() {
+    # Check if a value exists in a list of valid options
+    check_valid_value() {
+        local value="$1"
+        shift
+        local valid_values=("$@")
+        for valid in "${valid_values[@]}"; do
+            if [ "$value" = "$valid" ]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+
     # Check if rsync is installed
     check_rsync_installed() {
-        if [ "$rsync_mode" = "push" ] && ! command -v rsync >/dev/null 2>&1; then
-            log_message "Rsync is not installed. Exiting."
+        if ! command -v rsync >/dev/null 2>&1; then
+            log_message "Error: Rsync is not installed. Exiting."
             exit 1
         fi
     }
 
-    # Check if each source directory exists (for push only)
+    # Check if rsync_type and rsync_mode are set correctly
+    check_rsync_options() {
+        if ! check_valid_value "$rsync_type" "incremental" "mirror"; then
+            log_message "Error: Invalid rsync_type '$rsync_type'. It must be 'incremental' or 'mirror'. Exiting."
+            exit 1
+        fi
+
+        if ! check_valid_value "$rsync_mode" "push" "pull"; then
+            log_message "Error: Invalid rsync_mode '$rsync_mode'. It must be 'push' or 'pull'. Exiting."
+            exit 1
+        fi
+    }
+
+    # Check if source directories are valid
     check_source_directories() {
         if [ "$rsync_mode" = "push" ]; then
+            if [ "${#source_directories[@]}" -eq 0 ]; then
+                log_message "Error: No source directories specified. Exiting."
+                exit 1
+            fi
             for source_directory in "${source_directories[@]}"; do
                 if [ ! -d "$source_directory" ]; then
-                    log_message "Source directory ${source_directory} does not exist. Exiting."
+                    log_message "Error: Source directory '${source_directory}' does not exist. Exiting."
                     exit 1
                 fi
             done
@@ -119,25 +149,36 @@ pre_run_checks() {
         fi
     }
 
-    # Check if the destination directory exists (for push or pull)
+    # Check if destination directory is valid
     check_destination_directory() {
-        if [ ! -d "$destination_directory" ]; then
-            log_message "Destination directory ${destination_directory} does not exist locally. Creating it."
+        if [ -z "$destination_directory" ]; then
+            log_message "Error: No destination directory specified. Exiting."
+            exit 1
+        fi
+
+        if [ "$rsync_mode" = "pull" ] && [ ! -d "$destination_directory" ]; then
+            log_message "Destination directory '${destination_directory}' does not exist. Creating it."
             if ! mkdir -p "$destination_directory"; then
-                log_message "Failed to create local destination directory ${destination_directory}. Exiting."
+                log_message "Error: Failed to create local destination directory '${destination_directory}'. Exiting."
                 exit 1
             else
-                log_message "Successfully created local destination directory ${destination_directory}."
+                log_message "Successfully created local destination directory '${destination_directory}'."
             fi
+        elif [ "$rsync_mode" = "push" ] && [ ! -d "$destination_directory" ]; then
+            log_message "Destination directory '${destination_directory}' does not exist locally, but will be created remotely if needed."
         fi
     }
 
-    # Check SSH connection if needed (for remote replication)
+    # Check SSH connection if remote replication is enabled
     check_ssh_connection() {
         if [ "$remote_replication" = "yes" ]; then
+            if [ -z "$remote_user" ] || [ -z "$remote_server" ]; then
+                log_message "Error: remote_user and remote_server must be specified for remote replication. Exiting."
+                exit 1
+            fi
             log_message "Checking SSH connection to ${remote_user}@${remote_server}..."
             if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${remote_user}@${remote_server}" "exit" 2>/dev/null; then
-                log_message "SSH connection to ${remote_user}@${remote_server} failed. Exiting."
+                log_message "Error: SSH connection to ${remote_user}@${remote_server} failed. Exiting."
                 exit 1
             else
                 log_message "SSH connection to ${remote_user}@${remote_server} is successful."
@@ -147,11 +188,26 @@ pre_run_checks() {
         fi
     }
 
+    # Check if rsync flags are valid
+    check_rsync_flags() {
+        if [ -z "$rsync_short_args" ]; then
+            log_message "Error: rsync_short_args is not set. Exiting."
+            exit 1
+        fi
+        if [ -z "$rsync_long_args" ]; then
+            log_message "Warning: rsync_long_args is empty. Proceeding with only short args."
+        fi
+    }
+
     # Execute all checks
+    log_message "Starting pre-run checks..."
     check_rsync_installed
+    check_rsync_options
     check_source_directories
     check_destination_directory
     check_ssh_connection
+    check_rsync_flags
+    log_message "Pre-run checks completed successfully."
 }
 
 ####################
@@ -206,7 +262,7 @@ rsync_replication() {
     fi
 
     # Rsync flags to speed up remote replication
-    local rsync_flags="$rsync_shortargs $rsync_longargs $link_dest_option"
+    local rsync_flags="$rsync_short_args $rsync_long_args $link_dest_option"
     if [ "$remote_replication" = "yes" ]; then
         rsync_flags="$rsync_flags --partial --checksum"
     fi
