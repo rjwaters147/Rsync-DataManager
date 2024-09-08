@@ -48,6 +48,35 @@ Both sets of arguments are passed to Rsync during execution. The script will aut
 - **Full Replication**: Perform a complete copy of the source to the destination.
 - **Custom Rsync Flags**: Customize Rsync’s behavior with user-defined flags to optimize transfers for specific needs.
 
+## Initial Setup
+
+1. Create the Script File:
+
+    Navigate to the directory where you'd like to store the script. Typically, system-level scripts are stored in /usr/local/bin/ or /opt/scripts/, but you can also place it in your home directory or any other directory that suits your needs. For this guide, let's assume you're placing it in /opt/scripts/.
+    
+    `cd /opt/scripts/`
+
+   1. Create a new file and open it using a text editor like nano or vim. Here, we'll use nano:
+
+    `sudo nano rsync_replication.sh`
+
+   2. Paste the script into the file. In nano, paste the contents of the script after opening the file.
+   
+   3. Edit all the variables under `Configuration` to suit your enviroment.
+
+   4. Save and exit the file:
+
+    If using nano, press `Ctrl` + `O` to save the file, then `Ctrl` + `X` to exit.
+    If using vim, press `Esc`, type `:wq`, and press `Enter`.
+
+2. Make the Script Executable:
+
+    1. `sudo chmod +x /opt/scripts/rsync_replication.sh`
+
+3. Run the Script:
+   
+   1. `sudo /opt/scripts/rsync_replication.sh`
+
 ## Setting up as a Cron Job
 
 1. To automate the Rsync process, you can set up the script to run as a cron job:
