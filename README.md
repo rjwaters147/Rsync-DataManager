@@ -26,8 +26,10 @@ Edit the following settings in the script:
 - **Destination Directory**: The directory where files will be replicated.
 - **Rsync Mode**: Choose between `push` (local to remote) or `pull` (remote to local).
 - **Rsync Type**: Choose between `incremental` (sync differences) or `mirror` (full replication).
-- **Rsync Short Arguments**: Customize short Rsync arguments (e.g., `-avz`). Defaults to `-avzH` for archive, verbose, compress, and preserving hard links.
-- **Rsync Long Arguments**: Customize long Rsync options (e.g., `--delete`, `--checksum`). Defaults to `--delete --numeric-ids --checksum` for deleting on the destination, preserving IDs, and verifying file content.
+- **Rsync Short Arguments**: Customize short Rsync arguments (e.g., `-avz`). 
+  - Defaults to `-avzH` for archive, verbose, compress, and preserving hard links.
+- **Rsync Long Arguments**: Customize long Rsync options (e.g., `--delete`, `--checksum`). 
+  - Defaults to `--delete --numeric-ids --checksum` for deleting on the destination, preserving IDs, and verifying file content.
 - **Remote User and Server**: Set the SSH credentials for the remote server.
 - **Log File Path**: Set the location where logs will be stored.
 
