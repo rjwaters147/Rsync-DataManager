@@ -1,10 +1,10 @@
 # Rsync DataManager
 
-This script synchronizes files between a local machine and a remote server using Rsync. It supports both push (local to remote) and pull (remote to local) operations, and allows for incremental or full replication. Users can customize Rsync behavior through user-defined flags for maximum flexibility.
+This script synchronizes files between a local system and a remote system using Rsync. It supports both push (local to remote) and pull (remote to local) operations, and allows for incremental or full replication. Users can customize Rsync behavior through user-defined flags for maximum flexibility.
 
 ## Features
 
-- Synchronizes files between local and remote machines.
+- Synchronizes files between local and remote systems.
 - Supports incremental and full replication modes.
 - Can push files from local to remote or pull files from remote to local.
 - Logs replication activities.
@@ -20,7 +20,7 @@ Local Replication:
 
 Remote Replication:
   - Rsync installed on both the local and remote systems.
-  - Passwordless SSH access to the remote server.
+  - Passwordless SSH access to the remote system.
     - Setup Guide: https://www.redhat.com/sysadmin/passwordless-ssh
 
 ## Configuration
@@ -35,7 +35,7 @@ Edit the following settings in the script:
   - Defaults to `-avzH` for archive, verbose, compress, and preserving hard links.
 - **Rsync Long Arguments**: Customize long Rsync options (e.g., `--delete`, `--checksum`). 
   - Defaults to `--delete --numeric-ids --checksum` for deleting on the destination, preserving IDs, and verifying file content.
-- **Remote User and Server**: Set the SSH credentials for the remote server.
+- **Remote User and system**: Set the SSH credentials for the remote system.
 - **Log File Path**: Set the location where logs will be stored.
 
 ## Rsync Flags
@@ -49,8 +49,8 @@ Both sets of arguments are passed to Rsync during execution. The script will aut
 
 ## Example Use Cases
 
-- **Push Mode**: Backup local directories to a remote server.
-- **Pull Mode**: Restore or synchronize files from a remote server to a local machine.
+- **Push Mode**: Backup local directories to a remote system.
+- **Pull Mode**: Restore or synchronize files from a remote system to a local system.
 - **Incremental Replication**: Sync only the differences between the source and the destination to save space and bandwidth.
 - **Full Replication**: Perform a complete copy of the source to the destination.
 - **Custom Rsync Flags**: Customize Rsync’s behavior with user-defined flags to optimize transfers for specific needs.
