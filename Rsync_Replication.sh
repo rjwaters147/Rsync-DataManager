@@ -44,7 +44,6 @@ rsync_mode="push"  # Can be "push" or "pull"
 # - These flags will be applied based on the replication type.
 ####################
 rsync_retries=3  # Number of times to retry on failure
-rsync_retry_delay=5  # Delay in seconds between retries
 local_rsync_short_args="-aH" # Default short arguments for local replication only
 local_rsync_long_args="--delete --numeric-ids --delete-excluded --delete-missing-args --checksum --partial --inplace" # Default long arguments for local replication only
 remote_rsync_short_args="-aHvz" # Default short arguments for remote replication only
@@ -61,6 +60,16 @@ remote_user="remote_username" # Username for remote server (e.g., root)
 remote_server="remote_server_address" # IP or hostname (e.g., 192.168.1.200)
 
 ####################
+# Retention Policy
+# - Choose the retention policy: time_based, count_based, or storage_based
+# - How long to keep backups
+####################
+retention_policy="storage"  # Choose from "time", "count", "storage", or "off".
+backup_retention_days=30  # Retain backups for this many days (time-based retention)
+backup_retention_count=7  # Retain only the last X backups (count-based retention)
+backup_max_storage="100G"  # Maximum allowed backup storage (storage-based retention)
+
+####################
 # Log file for debugging
 # - Path where log messages will be saved.
 ####################
@@ -74,11 +83,23 @@ log_file="/path/to/logfile.log" # Path to log file (e.g., /var/log/rsync_replica
 declare -A used_basenames
 
 ####################
-# Funtction: log_message
-# - This function is used to log messages with timestamps to the log file and console.
-# - It creates the destination directory for the log file if it doesn't exist.
-# - It appends to the log file if it already exists.
+# Function: create_lockfile
+# - Create a lock file to ensure only one instance of the script is running.
 ####################
+create_lockfile() {
+    local lockfile="/tmp/backup_script.lock"
+
+    if [ -e "$lockfile" ]; then
+        log_message "ERROR" "Script is already running (lock file exists). Exiting."
+        exit 1
+    fi
+
+    # Ensure the lock file is removed on script exit (normal or error)
+    trap 'rm -f "$lockfile"; exit' INT TERM EXIT
+
+    touch "$lockfile"
+}
+
 ####################
 # Function: log_message
 # - This function logs messages with different log levels (INFO, ERROR, DEBUG).
@@ -94,7 +115,7 @@ log_message() {
 
     # Check if the log directory exists, and create it if it doesn't
     if [ ! -d "$log_dir" ]; then
-        if mkdir -p "$log_dir"; then
+        if ! mkdir -p "$log_dir"; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Failed to create log directory: $log_dir"
             exit 1
         fi
@@ -105,16 +126,35 @@ log_message() {
 }
 
 ####################
+# Function: rotate_logs
+# - Rotates and compresses old log files to prevent excessive log growth.
+####################
+rotate_logs() {
+    log_message "INFO" "Rotating logs."
+
+    # Rename the current log with a timestamp, then compress it
+    mv "$log_file" "${log_file}_$(date '+%Y%m%d%H%M%S')"
+    gzip "${log_file}_$(date '+%Y%m%d%H%M%S')"
+
+    # Keep only the latest 7 log files (adjust number as needed)
+    find "$(dirname "$log_file")" -name "$(basename "$log_file")*.gz" | sort -r | tail -n +8 | xargs rm -f
+
+    log_message "INFO" "Log rotation complete."
+}
+
+####################
 # Function: pre_run_checks
 # - Collection of checks to run before proceeding to execute the script.
 ####################
 pre_run_checks() {
-    # Check if rsync is installed
-    check_rsync_installed() {
-        if ! command -v rsync >/dev/null 2>&1; then
-            log_message "ERROR" "Rsync is not installed. Exiting."
-            exit 1
-        fi
+    # Check if rsync, du, numfmt, and ssh are installed
+    check_required_tools() {
+        for tool in rsync du numfmt ssh; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                log_message "ERROR" "$tool is not installed. Exiting."
+                exit 1
+            fi
+        done
     }
 
     # Check if rsync_type and rsync_mode are set correctly
@@ -188,13 +228,27 @@ pre_run_checks() {
         fi
     }
 
+    # Validate the retention policy
+    check_retention_policy() {
+        case "$retention_policy" in
+            time|count|storage|off)
+                log_message "INFO" "Valid retention policy selected: $retention_policy"
+                ;;
+            *)
+                log_message "ERROR" "Invalid retention policy '$retention_policy'. It must be one of: time, count, storage, or off."
+                exit 1
+                ;;
+        esac
+    }
+
     # Execute all checks
     log_message "INFO" "Starting pre-run checks..."
-    check_rsync_installed
+    check_required_tools
     check_rsync_options
     check_source_directories
     check_destination_directory
     check_ssh_connection
+    check_retention_policy
     log_message "INFO" "Pre-run checks completed successfully."
 }
 
@@ -225,12 +279,15 @@ sanitize_basename() {
 ####################
 # Function: rsync_replication
 # - Handles both push (local to remote) and pull (remote to local) rsync operations.
-# - Implements retry logic for network-related errors and improved logging.
+# - Implements retry logic for network-related errors with exponential backoff.
+# - Adds incremental backups with --link-dest, if applicable.
 ####################
 rsync_replication() {
     local source_directory="$1"
     local base_name
     local attempt=0
+    local backoff=1
+    local max_backoff=60  # Set a limit for exponential backoff
     local rsync_exit_code=0
 
     # List of retryable exit codes with documentation
@@ -261,6 +318,14 @@ rsync_replication() {
         rsync_flags="$local_rsync_short_args $local_rsync_long_args"
     fi
 
+    # Determine if link-dest should be added for incremental backups
+    if [ "$rsync_type" = "incremental" ]; then
+        previous_backup=$(find "${destination_directory}/${base_name}" -maxdepth 1 -type d | sort | tail -n 2 | head -n 1)
+        if [ -n "$previous_backup" ]; then
+            rsync_flags+=" --link-dest=${previous_backup}"
+        fi
+    fi
+
     # Rsync command logging
     log_message "INFO" "Executing rsync from '$source_directory' to '$destination' with flags: $rsync_flags"
 
@@ -275,7 +340,7 @@ rsync_replication() {
         return 1
     }
 
-    # Function to perform rsync with retries
+    # Function to perform rsync with retries and exponential backoff
     run_rsync_with_retries() {
         local attempt=0
 
@@ -321,8 +386,13 @@ rsync_replication() {
                 attempt=$((attempt + 1))
 
                 if [ "$attempt" -lt "$rsync_retries" ]; then
-                    log_message "INFO" "Retrying in $rsync_retry_delay seconds..."
-                    sleep "$rsync_retry_delay"
+                    log_message "INFO" "Retrying in $backoff seconds (exponential backoff)..."
+                    sleep "$backoff"
+                    backoff=$((backoff * 2))
+                    # Cap the backoff time to a maximum of 60 seconds
+                    if [ "$backoff" -gt "$max_backoff" ]; then
+                        backoff=$max_backoff
+                    fi
                 else
                     log_message "ERROR" "Max retries reached. Rsync failed with exit code $rsync_exit_code."
                     return $rsync_exit_code
@@ -334,8 +404,156 @@ rsync_replication() {
         done
     }
 
-    # Run rsync with retry logic
+    # Run rsync with retry logic and exponential backoff
     run_rsync_with_retries
+}
+
+####################
+# Function: delete_old_backups_time_based
+# - This function deletes backups older than the specified number of days (backup_retention_days).
+# - Handles both mirrored and incremental backups safely.
+####################
+delete_old_backups_time_based() {
+    # Ensure destination directory exists and contains backups
+    if [ ! -d "$destination_directory" ] || [ -z "$(ls -A "$destination_directory")" ]; then
+        log_message "INFO" "No backups found for time-based retention."
+        return
+    fi
+
+    # Find and delete directories older than the retention period
+    find "$destination_directory" -maxdepth 1 -type d -mtime +"$backup_retention_days" | while read -r backup_dir; do
+        if [ -d "$backup_dir" ]; then
+            log_message "INFO" "Removing backup directory: $backup_dir"
+
+            # If it's incremental, ensure we are not breaking hard links in other backups
+            if [ "$rsync_type" = "incremental" ]; then
+                log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
+                # Use `rsync --link-dest` for hard-link preservation before deletion
+                if ! rsync -a --dry-run --delete "$backup_dir/" "$destination_directory/"; then
+                    log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
+                else
+                    rm -rf "$backup_dir"
+                fi
+            else
+                # For mirrored backups, simple removal is safe
+                rm -rf "$backup_dir"
+            fi
+        fi
+    done
+}
+
+####################
+# Function: delete_old_backups_count_based
+# - This function keeps only the latest X backups, where X is defined by backup_retention_count.
+# - Safely handles both mirrored and incremental backups.
+####################
+delete_old_backups_count_based() {
+    # Ensure destination directory exists and contains backups
+    if [ ! -d "$destination_directory" ] || [ -z "$(ls -A "$destination_directory")" ]; then
+        log_message "INFO" "No backups found for count-based retention."
+        return
+    fi
+
+    # List all backup directories sorted by modification time (oldest first)
+    mapfile -t backups < <(find "$destination_directory" -maxdepth 1 -mindepth 1 -type d -exec stat --format='%Y %n' {} + | sort -n | awk '{print $2}')
+
+    # If the number of backups exceeds the retention count, delete the oldest ones
+    if [ "${#backups[@]}" -gt "$backup_retention_count" ]; then
+        for ((i=0; i<${#backups[@]}-"$backup_retention_count"; i++)); do
+            backup_dir="${backups[i]}"
+            log_message "INFO" "Removing old backup: $backup_dir"
+
+            # Perform safety checks for incremental backups
+            if [ "$rsync_type" = "incremental" ]; then
+                log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
+                if ! rsync -a --dry-run --delete "$backup_dir/" "$destination_directory/"; then
+                    log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
+                else
+                    rm -rf "$backup_dir"
+                fi
+            else
+                # For mirrored backups, safe to simply remove
+                rm -rf "$backup_dir"
+            fi
+        done
+    else
+        log_message "INFO" "No excess backups found. Retention not required."
+    fi
+}
+
+####################
+# Function: delete_old_backups_storage_based
+# - This function deletes old backups when storage exceeds the defined limit.
+# - Gracefully handles incremental backups by checking hard links.
+####################
+delete_old_backups_storage_based() {
+    # Calculate the total storage used by backups in the destination directory, accounting for apparent size
+    current_storage=$(du --apparent-size -sb "$destination_directory" | awk '{print $1}')
+
+    # Convert the maximum allowed storage to bytes
+    max_storage_bytes=$(numfmt --from=iec "$backup_max_storage")
+
+    # If current storage exceeds the maximum, start deleting old backups
+    if [ "$current_storage" -gt "$max_storage_bytes" ]; then
+        log_message "INFO" "Current storage ($current_storage bytes) exceeds the limit ($max_storage_bytes bytes). Removing older backups."
+
+    # List all backup directories sorted by modification time (oldest first)
+    mapfile -t backups < <(find "$destination_directory" -maxdepth 1 -mindepth 1 -type d -exec stat --format='%Y %n' {} + | sort -n | awk '{print $2}')
+
+        # Start deleting the oldest backups until we fall below the limit
+        for backup_dir in "${backups[@]}"; do
+            log_message "INFO" "Removing backup: $backup_dir"
+            
+            if [ "$rsync_type" = "incremental" ]; then
+                log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
+                # Safely delete without breaking hard links in other backups
+                rm -rf "$backup_dir"
+            else
+                # For mirrored backups, safe to remove directly
+                rm -rf "$backup_dir"
+            fi
+
+            # Recalculate the storage usage after each deletion
+            current_storage=$(du --apparent-size -sb "$destination_directory" | awk '{print $1}')
+            
+            # Stop deleting if the storage is now within the limit
+            if [ "$current_storage" -le "$max_storage_bytes" ]; then
+                log_message "INFO" "Backup storage is now within the allowed limit."
+                break
+            fi
+        done
+    else
+        log_message "INFO" "Current storage ($current_storage bytes) is within the limit ($max_storage_bytes bytes). No deletion needed."
+    fi
+}
+
+####################
+# Function: apply_retention_policy
+# - This function applies the selected retention policy.
+####################
+apply_retention_policy() {
+    log_message "INFO" "Applying retention policy: $retention_policy"
+
+    case "$retention_policy" in
+        time)
+            log_message "INFO" "Starting time-based backup retention: deleting backups older than ${backup_retention_days} days."
+            delete_old_backups_time_based
+            log_message "INFO" "Completed time-based backup retention."
+            ;;
+        count)
+            log_message "INFO" "Starting count-based backup retention: retaining only the latest ${backup_retention_count} backups."
+            delete_old_backups_count_based
+            log_message "INFO" "Completed count-based backup retention."
+            ;;
+        storage)
+            log_message "INFO" "Starting storage-based backup retention: ensuring total backup storage does not exceed ${backup_max_storage}."
+            delete_old_backups_storage_based
+            log_message "INFO" "Completed storage-based backup retention."
+            ;;
+        off)
+            log_message "INFO" "Retention Policy is turned off."
+            ;;
+    esac
 }
 
 ####################
@@ -354,5 +572,8 @@ run_for_each_source() {
 ####################
 # Main Script Execution
 ####################
+create_lockfile
+rotate_logs
 pre_run_checks
 run_for_each_source
+apply_retention_policy
