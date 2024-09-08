@@ -53,11 +53,12 @@ Both sets of arguments are passed to Rsync during execution. The script will aut
 - 1. To automate the Rsync process, you can set up the script to run as a cron job:
 
     Open the cron job configuration for the current user:
-`crontab -e`
+    
+    `crontab -e`
 
 - 2. Add an entry to run the Rsync script at a specified interval. For example, to run the script every day at midnight, add:
-
-`0 0 * * * /path/to/rsync_replication.sh >> /path/to/logfile.log 2>&1`
+  
+     `0 0 * * * /path/to/rsync_replication.sh >> /path/to/logfile.log 2>&1`
 
     - In this example:
         `0 0 * * *`: This is the cron schedule to run the script every day at midnight.
