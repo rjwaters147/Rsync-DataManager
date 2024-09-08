@@ -15,10 +15,10 @@ This script synchronizes files between a local machine and a remote server using
 
 ## Requirements
 
-- Local Replication:
+Local Replication:
   - Rsync installed on the system.
 
-- Remote Replication:
+Remote Replication:
   - Rsync installed on both the local and remote systems.
   - Passwordless SSH access to the remote server.
     - Setup Guide: https://www.redhat.com/sysadmin/passwordless-ssh
