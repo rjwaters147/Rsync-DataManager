@@ -43,10 +43,12 @@ rsync_mode="push"  # Can be "push" or "pull"
 # - Note: If rsync_type is set to incremental --link_dest will be added automatically
 # - These flags will be applied based on the replication type.
 ####################
-rsync_short_args="-avzH" # Suggested defaults
-rsync_long_args="--delete --numeric-ids --delete-excluded --delete-missing-args --checksum --partial" # Suggested defaults
 rsync_retries=3  # Number of times to retry on failure
 rsync_retry_delay=5  # Delay in seconds between retries
+local_rsync_short_args="-aH" # Default short arguments for local replication only
+local_rsync_long_args="--delete --numeric-ids --delete-excluded --delete-missing-args --checksum --partial --inplace" # Default long arguments for local replication only
+remote_rsync_short_args="-aHvz" # Default short arguments for remote replication only
+remote_rsync_long_args="--delete --numeric-ids --delete-excluded --delete-missing-args --checksum --partial --compress-level=1" # Default long arguments for remote replication only
 
 ####################
 # Remote replication variables
@@ -77,8 +79,14 @@ declare -A used_basenames
 # - It creates the destination directory for the log file if it doesn't exist.
 # - It appends to the log file if it already exists.
 ####################
+####################
+# Function: log_message
+# - This function logs messages with different log levels (INFO, ERROR, DEBUG).
+# - It creates the destination directory for the log file if it doesn't exist.
+####################
 log_message() {
-    local message="$1"
+    local level="$1"  # Log level (INFO, ERROR, DEBUG)
+    local message="$2"  # Log message
 
     # Extract the directory from the log file path
     local log_dir
@@ -92,19 +100,19 @@ log_message() {
         fi
     fi
 
-    # Log the message with a timestamp and append it to the log file
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ${message}" | tee -a "$log_file"
+    # Log message with timestamp and level
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] ${message}" | tee -a "$log_file"
 }
 
 ####################
 # Function: pre_run_checks
-# - Collection of checks to run before proceeding to execute the script
+# - Collection of checks to run before proceeding to execute the script.
 ####################
 pre_run_checks() {
     # Check if rsync is installed
     check_rsync_installed() {
         if ! command -v rsync >/dev/null 2>&1; then
-            log_message "Error: Rsync is not installed. Exiting."
+            log_message "ERROR" "Rsync is not installed. Exiting."
             exit 1
         fi
     }
@@ -112,12 +120,12 @@ pre_run_checks() {
     # Check if rsync_type and rsync_mode are set correctly
     check_rsync_options() {
         if ! check_valid_value "$rsync_type" "incremental" "mirror"; then
-            log_message "Error: Invalid rsync_type '$rsync_type'. It must be 'incremental' or 'mirror'. Exiting."
+            log_message "ERROR" "Invalid rsync_type '$rsync_type'. It must be 'incremental' or 'mirror'. Exiting."
             exit 1
         fi
 
         if ! check_valid_value "$rsync_mode" "push" "pull"; then
-            log_message "Error: Invalid rsync_mode '$rsync_mode'. It must be 'push' or 'pull'. Exiting."
+            log_message "ERROR" "Invalid rsync_mode '$rsync_mode'. It must be 'push' or 'pull'. Exiting."
             exit 1
         fi
     }
@@ -126,37 +134,37 @@ pre_run_checks() {
     check_source_directories() {
         if [ "$rsync_mode" = "push" ]; then
             if [ "${#source_directories[@]}" -eq 0 ]; then
-                log_message "Error: No source directories specified. Exiting."
+                log_message "ERROR" "No source directories specified. Exiting."
                 exit 1
             fi
             for source_directory in "${source_directories[@]}"; do
                 if [ ! -d "$source_directory" ]; then
-                    log_message "Error: Source directory '${source_directory}' does not exist. Exiting."
+                    log_message "ERROR" "Source directory '${source_directory}' does not exist. Exiting."
                     exit 1
                 fi
             done
         else
-            log_message "Skipping source directory check for pull mode."
+            log_message "INFO" "Skipping source directory check for pull mode."
         fi
     }
 
     # Check if destination directory is valid
     check_destination_directory() {
         if [ -z "$destination_directory" ]; then
-            log_message "Error: No destination directory specified. Exiting."
+            log_message "ERROR" "No destination directory specified. Exiting."
             exit 1
         fi
 
         if [ "$rsync_mode" = "pull" ] && [ ! -d "$destination_directory" ]; then
-            log_message "Destination directory '${destination_directory}' does not exist. Creating it."
+            log_message "INFO" "Destination directory '${destination_directory}' does not exist. Creating it."
             if ! mkdir -p "$destination_directory"; then
-                log_message "Error: Failed to create local destination directory '${destination_directory}'. Exiting."
+                log_message "ERROR" "Failed to create local destination directory '${destination_directory}'. Exiting."
                 exit 1
             else
-                log_message "Successfully created local destination directory '${destination_directory}'."
+                log_message "INFO" "Successfully created local destination directory '${destination_directory}'."
             fi
         elif [ "$rsync_mode" = "push" ] && [ ! -d "$destination_directory" ]; then
-            log_message "Destination directory '${destination_directory}' does not exist locally, but will be created remotely if needed."
+            log_message "INFO" "Destination directory '${destination_directory}' does not exist locally, but will be created remotely if needed."
         fi
     }
 
@@ -164,29 +172,30 @@ pre_run_checks() {
     check_ssh_connection() {
         if [ "$remote_replication" = "yes" ]; then
             if [ -z "$remote_user" ] || [ -z "$remote_server" ]; then
-                log_message "Error: remote_user and remote_server must be specified for remote replication. Exiting."
+                log_message "ERROR" "remote_user and remote_server must be specified for remote replication. Exiting."
                 exit 1
             fi
-            log_message "Checking SSH connection to ${remote_user}@${remote_server}..."
+            log_message "INFO" "Checking SSH connection to ${remote_user}@${remote_server}..."
+
             if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${remote_user}@${remote_server}" "exit" 2>/dev/null; then
-                log_message "Error: SSH connection to ${remote_user}@${remote_server} failed. Exiting."
+                log_message "ERROR" "SSH connection to ${remote_user}@${remote_server} failed. Please verify SSH settings and try again."
                 exit 1
             else
-                log_message "SSH connection to ${remote_user}@${remote_server} is successful."
+                log_message "INFO" "SSH connection to ${remote_user}@${remote_server} is successful."
             fi
         else
-            log_message "Skipping SSH connection check (local replication)."
+            log_message "INFO" "Skipping SSH connection check (local replication)."
         fi
     }
 
     # Execute all checks
-    log_message "Starting pre-run checks..."
+    log_message "INFO" "Starting pre-run checks..."
     check_rsync_installed
     check_rsync_options
     check_source_directories
     check_destination_directory
     check_ssh_connection
-    log_message "Pre-run checks completed successfully."
+    log_message "INFO" "Pre-run checks completed successfully."
 }
 
 ####################
@@ -215,9 +224,8 @@ sanitize_basename() {
 
 ####################
 # Function: rsync_replication
-# - This function handles both push (local to remote) and pull (remote to local) rsync operations.
-# - It implements retry logic in case of rsync failure, especially for network-related issues.
-# - The function retries rsync up to a specified number of times if it fails due to specific transient errors.
+# - Handles both push (local to remote) and pull (remote to local) rsync operations.
+# - Implements retry logic for network-related errors and improved logging.
 ####################
 rsync_replication() {
     local source_directory="$1"
@@ -225,8 +233,14 @@ rsync_replication() {
     local attempt=0
     local rsync_exit_code=0
 
-    # List of retryable exit codes (common network-related and I/O errors)
-    local retryable_exit_codes=(10 11 12 30 35 255)  # Socket I/O, File I/O, Protocol errors, Timeouts, SSH failure
+    # List of retryable exit codes with documentation
+    local retryable_exit_codes=(10 11 12 30 35 255)  # Common network-related and I/O errors:
+    # 10: Error in socket I/O
+    # 11: Error in file I/O
+    # 12: Error in rsync protocol data stream
+    # 30: Timeout in data send/receive
+    # 35: Timeout waiting for daemon connection
+    # 255: SSH connection failure
 
     # Sanitize the basename to avoid conflicts
     base_name=$(sanitize_basename "$source_directory")
@@ -239,11 +253,16 @@ rsync_replication() {
         destination="${destination_directory}/${base_name}"
     fi
 
-    # Rsync flags to speed up remote replication
-    local rsync_flags="$rsync_short_args $rsync_long_args"
+    # Rsync flags based on local or remote replication
+    local rsync_flags
+    if [ "$remote_replication" = "yes" ]; then
+        rsync_flags="$remote_rsync_short_args $remote_rsync_long_args"
+    else
+        rsync_flags="$local_rsync_short_args $local_rsync_long_args"
+    fi
 
     # Rsync command logging
-    log_message "Executing rsync from '$source_directory' to '$destination' with flags: $rsync_flags"
+    log_message "INFO" "Executing rsync from '$source_directory' to '$destination' with flags: $rsync_flags"
 
     # Function to check if the rsync exit code is retryable
     is_retryable_exit_code() {
@@ -261,7 +280,7 @@ rsync_replication() {
         local attempt=0
 
         while [ "$attempt" -lt "$rsync_retries" ]; do
-            log_message "Rsync attempt $((attempt+1)) of $rsync_retries..."
+            log_message "INFO" "Rsync attempt $((attempt+1)) of $rsync_retries..."
 
             # Rsync for push mode (local to remote)
             if [ "$rsync_mode" = "push" ]; then
@@ -276,17 +295,17 @@ rsync_replication() {
             elif [ "$rsync_mode" = "pull" ]; then
                 if [ "$remote_replication" = "yes" ]; then
                     if [ -z "$source_directory" ]; then
-                        log_message "Error: source directory is not set for pull mode."
+                        log_message "ERROR" "Source directory is not set for pull mode."
                         return 1
                     fi
                     if ! ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\"" >/dev/null 2>&1; then
-                        log_message "Error: Source directory '${source_directory}' does not exist on remote server."
+                        log_message "ERROR" "Source directory '${source_directory}' does not exist on remote server."
                         return 1
                     fi
                     mkdir -p "$destination"  # Ensure destination directory exists locally
                     rsync $rsync_flags -e ssh "${remote_user}@${remote_server}:${source_directory}/" "${destination}/"
                 else
-                    log_message "Error: Pull mode requires remote replication. Set remote_replication to 'yes'."
+                    log_message "ERROR" "Pull mode requires remote replication. Set remote_replication to 'yes'."
                     return 1
                 fi
             fi
@@ -295,21 +314,21 @@ rsync_replication() {
             rsync_exit_code=$?
 
             if [ $rsync_exit_code -eq 0 ]; then
-                log_message "Rsync ${rsync_type} replication was successful."
+                log_message "INFO" "Rsync ${rsync_type} replication was successful."
                 return 0
             elif is_retryable_exit_code $rsync_exit_code; then
-                log_message "Rsync attempt $((attempt+1)) failed with exit code $rsync_exit_code (retryable)."
+                log_message "ERROR" "Rsync attempt $((attempt+1)) failed with exit code $rsync_exit_code (retryable)."
                 attempt=$((attempt + 1))
 
                 if [ "$attempt" -lt "$rsync_retries" ]; then
-                    log_message "Retrying in $rsync_retry_delay seconds..."
+                    log_message "INFO" "Retrying in $rsync_retry_delay seconds..."
                     sleep "$rsync_retry_delay"
                 else
-                    log_message "Max retries reached. Rsync failed with exit code $rsync_exit_code."
+                    log_message "ERROR" "Max retries reached. Rsync failed with exit code $rsync_exit_code."
                     return $rsync_exit_code
                 fi
             else
-                log_message "Rsync failed with exit code $rsync_exit_code (non-retryable)."
+                log_message "ERROR" "Rsync failed with exit code $rsync_exit_code (non-retryable)."
                 return $rsync_exit_code
             fi
         done
