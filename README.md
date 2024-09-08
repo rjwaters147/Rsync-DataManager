@@ -70,6 +70,7 @@ Both sets of arguments are passed to Rsync during execution. The script will aut
 3. Cron Job Time Format:
 
     `* * * * *`: Minute, Hour, Day of the Month, Month, Day of the Week.
+    
     For example:
        - `0 0 * * *`: Run at midnight every day.
        - `0 3 * * 1`: Run at 3:00 AM every Monday.
