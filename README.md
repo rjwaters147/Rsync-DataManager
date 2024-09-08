@@ -66,8 +66,8 @@ Both sets of arguments are passed to Rsync during execution. The script will aut
 
    4. Save and exit the file:
 
-    If using nano, press `Ctrl` + `O` to save the file, then `Ctrl` + `X` to exit.
-    If using vim, press `Esc`, type `:wq`, and press `Enter`.
+    - If using nano, press `Ctrl` + `O` to save the file, then `Ctrl` + `X` to exit.
+    - If using vim, press `Esc`, type `:wq`, and press `Enter`.
 
 2. Make the Script Executable:
 
