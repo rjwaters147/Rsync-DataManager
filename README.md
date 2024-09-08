@@ -61,9 +61,9 @@ Both sets of arguments are passed to Rsync during execution. The script will aut
      `0 0 * * * /path/to/rsync_replication.sh >> /path/to/logfile.log 2>&1`
 
     - In this example:
-        `0 0 * * *`: This is the cron schedule to run the script every day at midnight.
-        `/path/to/rsync_replication.sh`: Replace with the full path to your Rsync script.
-        `>> /path/to/logfile.log 2>&1`: This redirects both the standard output and error output to the log file.
+    - `0 0 * * *`: This is the cron schedule to run the script every day at midnight.
+    - `/path/to/rsync_replication.sh`: Replace with the full path to your Rsync script.
+    - `>> /path/to/logfile.log 2>&1`: This redirects both the standard output and error output to the log file.
 
     Save and exit the cron editor. The script will now run at the specified time.
 
