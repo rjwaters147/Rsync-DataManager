@@ -159,12 +159,12 @@ pre_run_checks() {
 
     # Check if rsync_type and rsync_mode are set correctly
     check_rsync_options() {
-        if ! check_valid_value "$rsync_type" "incremental" "mirror"; then
+        if [ "$rsync_type" != "incremental" ] && [ "$rsync_type" != "mirror" ]; then
             log_message "ERROR" "Invalid rsync_type '$rsync_type'. It must be 'incremental' or 'mirror'. Exiting."
             exit 1
         fi
 
-        if ! check_valid_value "$rsync_mode" "push" "pull"; then
+        if [ "$rsync_mode" != "push" ] && [ "$rsync_mode" != "pull" ]; then
             log_message "ERROR" "Invalid rsync_mode '$rsync_mode'. It must be 'push' or 'pull'. Exiting."
             exit 1
         fi
