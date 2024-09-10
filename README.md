@@ -117,6 +117,16 @@ To automate the backup process, configure the script to run as a cron job.
     ```
     This example runs the script every day at midnight.
 
+## Restoring After Data Loss
+
+Should your backups be needed for any reason restoring data is easy.
+Simply just adjust the variables of the script as needed to push/pull data in the opposite direction you had originally configured it for.
+Just make sure you include the timestamped directory as the source like so:
+
+    ```bash
+    source_directories=("/path/to/backup/source/2023-09-01_0000")
+    ```
+
 ## Logging and Monitoring
 
 Logs are written to the specified log file with detailed messages, including timestamps, errors, and Rsync operations. Old logs are automatically rotated and compressed to avoid excessive disk usage.
