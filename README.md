@@ -1,120 +1,125 @@
 # Rsync DataManager
 
-This script synchronizes files between a local system and a remote system using Rsync. It supports both push (local to remote) and pull (remote to local) operations, and allows for incremental or full replication. Users can customize Rsync behavior through user-defined flags for maximum flexibility.
+This script automates the synchronization of files between a local system and a remote system using Rsync. It supports both push (local to remote) and pull (remote to local) operations, as well as incremental or full replication. The script provides robust logging, retention policies, and the ability to customize Rsync behavior with user-defined flags for maximum flexibility.
 
 ## Features
 
-- Synchronizes files between local and remote systems.
-- Supports incremental and full replication modes.
-- Can push files from local to remote or pull files from remote to local.
-- Logs replication activities.
-- Automatically creates destination directories if they do not exist.
-- Handles multiple source directories.
-- Supports user-defined Rsync flags for greater control over the sync process.
-- Validates configuration settings before execution.
+- **Flexible Replication**: Supports both local-to-remote (push) and remote-to-local (pull) file synchronization.
+- **Incremental and Full Backups**: Choose between syncing only changed files (incremental) or performing a full copy of the data (mirror).
+- **Customizable Rsync Flags**: Modify short and long Rsync flags to tailor the transfer to your needs.
+- **Retention Policies**: Automatically manage old backups using time, count, or storage-based retention policies to prevent excessive storage usage.
+- **Log Rotation**: Compresses and rotates log files to prevent uncontrolled log growth.
+- **Automatic Directory Creation**: Automatically creates the destination directory if it doesn't exist.
+- **Concurrency Control**: Prevents multiple script instances from running simultaneously using lock files.
+- **Retry with Exponential Backoff**: Automatically retries failed Rsync operations with exponential backoff for transient network or I/O issues.
 
 ## Requirements
 
-Local Replication:
-  - Rsync installed on the system.
+### Local Replication:
+- Rsync installed on the local system.
 
-Remote Replication:
-  - Rsync installed on both the local and remote systems.
-  - Passwordless SSH access to the remote system.
-    - Setup Guide: https://www.redhat.com/sysadmin/passwordless-ssh
+### Remote Replication:
+- Rsync installed on both the local and remote systems.
+- Passwordless SSH access to the remote system.
+    - Setup Guide: [RedHat Passwordless SSH](https://www.redhat.com/sysadmin/passwordless-ssh)
 
 ## Configuration
 
-Edit the following settings in the script:
+Edit the following settings in the script to suit your environment:
 
-- **Source Directories**: The directories to be synchronized.
-- **Destination Directory**: The directory where files will be replicated.
-- **Rsync Mode**: Choose between `push` (local to remote) or `pull` (remote to local).
-- **Rsync Type**: Choose between `incremental` (sync differences) or `mirror` (full replication).
-- **Rsync Short Arguments**: Customize short Rsync arguments (e.g., `-avz`). 
-  - Defaults to `-avzH` for archive, verbose, compress, and preserving hard links.
-- **Rsync Long Arguments**: Customize long Rsync options (e.g., `--delete`, `--checksum`). 
-  - Defaults to `--delete --numeric-ids --checksum` for deleting on the destination, preserving IDs, and verifying file content.
-- **Remote User and system**: Set the SSH credentials for the remote system.
-- **Log File Path**: Set the location where logs will be stored.
+### Key Variables:
+- **Source Directories**: Directories to be synchronized.
+  - Example: `source_directories=("/path/to/source1" "/path/to/source2")`
+- **Destination Directory**: Directory where the synchronized files will be stored.
+  - Example: `destination_directory="/path/to/destination"`
+- **Rsync Mode**: Define the sync direction: `push` (local to remote) or `pull` (remote to local).
+  - Example: `rsync_mode="push"`
+- **Rsync Type**: Define the replication type: `incremental` (sync differences) or `mirror` (full replication).
+  - Example: `rsync_type="incremental"`
 
-## Rsync Flags
+### Rsync Flags:
+- **`rsync_short_args`**: Short options like `-a`, `-v`, `-z`. 
+  - Example: `local_rsync_short_args="-aH"`
+- **`rsync_long_args`**: Long options like `--delete`, `--checksum`.
+  - Example: `local_rsync_long_args="--delete --numeric-ids --checksum"`
 
-You can configure Rsync flags in two variables:
+### Remote Connection:
+- **Remote User**: Username for the remote system.
+  - Example: `remote_user="username"`
+- **Remote Server**: IP address or hostname of the remote system.
+  - Example: `remote_server="192.168.1.100"`
 
-- **`rsync_short_args`**: Short options like `-a`, `-v`, `-z` for archiving, verbosity, and compression.
-- **`rsync_long_args`**: Long options like `--delete`, `--checksum` for removing files on the destination or verifying file contents.
+### Retention Policies:
+- **Retention Policy**: Choose from `time`, `count`, `storage`, or `off` to manage old backups automatically.
+  - Example: `retention_policy="storage"`
+- **Retention Settings**:
+  - **Time-Based Retention**: Delete backups older than a specified number of days.
+    - Example: `backup_retention_days=30`
+  - **Count-Based Retention**: Keep only the last X backups.
+    - Example: `backup_retention_count=7`
+  - **Storage-Based Retention**: Delete old backups when storage exceeds a limit.
+    - Example: `backup_max_storage="100G"`
 
-Both sets of arguments are passed to Rsync during execution. The script will automatically add `--link-dest` when performing incremental backups.
+### Logging:
+- **Log File Path**: Define where logs will be stored.
+  - Example: `log_file="/path/to/logfile.log"`
+
+### Concurrency Control:
+- The script creates a lock file to ensure only one instance of the script runs at a time. The lock file is automatically removed when the script finishes or is interrupted.
+
+## Rsync Features
+
+The script supports full customization of Rsync’s behavior:
+- **`rsync_short_args`**: Short Rsync options for efficiency (e.g., `-a`, `-v`, `-z`).
+- **`rsync_long_args`**: Long Rsync options for granular control (e.g., `--delete`, `--checksum`).
+- **Exponential Backoff**: Automatically retries Rsync with increasing delays when network issues or transient errors occur.
+- **Incremental Backups**: Uses `--link-dest` to create incremental backups, saving space and bandwidth.
 
 ## Example Use Cases
 
-- **Push Mode**: Backup local directories to a remote system.
-- **Pull Mode**: Restore or synchronize files from a remote system to a local system.
-- **Incremental Replication**: Sync only the differences between the source and the destination to save space and bandwidth.
-- **Full Replication**: Perform a complete copy of the source to the destination.
-- **Custom Rsync Flags**: Customize Rsync’s behavior with user-defined flags to optimize transfers for specific needs.
+- **Push Mode Backup**: Sync local files to a remote server.
+- **Pull Mode Restore**: Restore files from a remote server to a local system.
+- **Incremental Backups**: Efficiently back up only the differences between source and destination.
+- **Full Mirror Backup**: Create an exact replica of the source at the destination.
+- **Automated Backup Retention**: Manage storage and prevent accumulation of old backups with retention policies.
 
 ## Initial Setup
 
-1. Create the Script File:
+1. **Create the Script File**:
+    ```bash
+    cd /opt/scripts/
+    sudo nano rsync_replication.sh
+    ```
+    Paste the script contents into the file and save.
 
-    Navigate to the directory where you'd like to store the script. Typically, system-level scripts are stored in /usr/local/bin/ or /opt/scripts/, but you can also place it in your home directory or any other directory that suits your needs. For this guide, let's assume you're placing it in /opt/scripts/.
-    
-    `cd /opt/scripts/`
+2. **Make the Script Executable**:
+    ```bash
+    sudo chmod +x /opt/scripts/rsync_replication.sh
+    ```
 
-   1. Create a new file and open it using a text editor like nano or vim. Here, we'll use nano:
+3. **Run the Script**:
+    ```bash
+    sudo /opt/scripts/rsync_replication.sh
+    ```
 
-    `sudo nano rsync_replication.sh`
+## Setting Up as a Cron Job
 
-   2. Paste the script into the file. In nano, paste the contents of the script after opening the file.
-   
-   3. Edit all the variables under `Configuration` to suit your enviroment.
+To automate the backup process, configure the script to run as a cron job.
 
-   4. Save and exit the file:
+1. Open the cron job configuration for the current user:
+    ```bash
+    crontab -e
+    ```
 
-    - If using nano, press `Ctrl` + `O` to save the file, then `Ctrl` + `X` to exit.
-    - If using vim, press `Esc`, type `:wq`, and press `Enter`.
+2. Add an entry to run the script at the desired interval:
+    ```bash
+    0 0 * * * /path/to/rsync_replication.sh >> /path/to/logfile.log 2>&1
+    ```
+    This example runs the script every day at midnight.
 
-2. Make the Script Executable:
+## Logging and Monitoring
 
-    1. `sudo chmod +x /opt/scripts/rsync_replication.sh`
-
-3. Run the Script:
-   
-   1. `sudo /opt/scripts/rsync_replication.sh`
-
-## Setting up as a Cron Job
-
-1. To automate the Rsync process, you can set up the script to run as a cron job:
-
-    Open the cron job configuration for the current user:
-    
-    `crontab -e`
-
-2. Add an entry to run the Rsync script at a specified interval. For example, to run the script every day at midnight, add:
-  
-     `0 0 * * * /path/to/rsync_replication.sh >> /path/to/logfile.log 2>&1`
-     
-     In this example:
-    - `0 0 * * *`: This is the cron schedule to run the script every day at midnight.
-    - `/path/to/rsync_replication.sh`: Replace with the full path to your Rsync script.
-    - `>> /path/to/logfile.log 2>&1`: This redirects both the standard output and error output to the log file.
-
-    Save and exit the cron editor. The script will now run at the specified time.
-
-1. Cron Job Time Format:
-
-    `* * * * *`: Minute, Hour, Day of the Month, Month, Day of the Week.
-
-    For example:
-    - `0 0 * * *`: Run at midnight every day.
-    - `0 3 * * 1`: Run at 3:00 AM every Monday.
-    - `*/15 * * * *`: Run every 15 minutes.
-
-## Logging
-
-Logs are written to the specified log file with timestamps for each operation, providing a detailed record of the replication process, including success and failure messages.
+Logs are written to the specified log file with detailed messages, including timestamps, errors, and Rsync operations. Old logs are automatically rotated and compressed to avoid excessive disk usage.
 
 ## License
 
