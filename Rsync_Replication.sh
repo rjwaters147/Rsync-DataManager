@@ -148,7 +148,7 @@ rotate_logs() {
     mv "$log_file" "${log_file}_$(date '+%Y%m%d%H%M%S')"
     gzip "${log_file}_$(date '+%Y%m%d%H%M%S')"
 
-    # Keep only the latest 7 log files (adjust number as needed)
+    # Keep only the latest 7 log files
     find "$(dirname "$log_file")" -name "$(basename "$log_file")*.gz" | sort -r | tail -n +8 | xargs rm -f
 
     log_message "INFO" "Log rotation complete."
@@ -426,31 +426,37 @@ rsync_replication() {
 # - Handles both mirrored and incremental backups safely.
 ####################
 delete_old_backups_time_based() {
-    # Ensure destination directory exists and contains backups
-    if [ ! -d "$destination_directory" ] || [ -z "$(ls -A "$destination_directory")" ]; then
-        log_message "INFO" "No backups found for time-based retention."
-        return
-    fi
+    for source_directory in "${source_directories[@]}"; do
+        local base_name
+        base_name=$(sanitize_basename "$source_directory")
+        backup_dirs="${destination_directory}/${base_name}"
 
-    # Find and delete directories older than the retention period
-    find "$destination_directory" -maxdepth 1 -type d -mtime +"$backup_retention_days" | while read -r backup_dir; do
-        if [ -d "$backup_dir" ]; then
-            log_message "INFO" "Removing backup directory: $backup_dir"
+        # Ensure destination directory exists and contains backups
+        if [ ! -d "$backup_dirs" ] || [ -z "$(ls -A "$backup_dirs")" ]; then
+            log_message "INFO" "No backups found for time-based retention for $base_name."
+            continue
+        fi
 
-            # If it's incremental, ensure we are not breaking hard links in other backups
-            if [ "$rsync_type" = "incremental" ]; then
-                log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
-                # Use `rsync --link-dest` for hard-link preservation before deletion
-                if ! rsync -a --dry-run --delete "$backup_dir/" "$destination_directory/"; then
-                    log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
+        # Find and delete directories older than the retention period
+        find "$backup_dirs" -maxdepth 1 -type d -mtime +"$backup_retention_days" | while read -r backup_dir; do
+            if [ -d "$backup_dir" ]; then
+                log_message "INFO" "Removing backup directory: $backup_dir"
+
+                # If it's incremental, ensure we are not breaking hard links in other backups
+                if [ "$rsync_type" = "incremental" ]; then
+                    log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
+                    # Use `rsync --link-dest` for hard-link preservation before deletion
+                    if ! rsync -a --dry-run --delete "$backup_dir/" "$backup_dirs/"; then
+                        log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
+                    else
+                        rm -rf "$backup_dir"
+                    fi
                 else
+                    # For mirrored backups, simple removal is safe
                     rm -rf "$backup_dir"
                 fi
-            else
-                # For mirrored backups, simple removal is safe
-                rm -rf "$backup_dir"
             fi
-        fi
+        done
     done
 }
 
@@ -460,37 +466,48 @@ delete_old_backups_time_based() {
 # - Safely handles both mirrored and incremental backups.
 ####################
 delete_old_backups_count_based() {
-    # Ensure destination directory exists and contains backups
-    if [ ! -d "$destination_directory" ] || [ -z "$(ls -A "$destination_directory")" ]; then
-        log_message "INFO" "No backups found for count-based retention."
-        return
-    fi
+    # Loop through each source directory (e.g., ctest, vtest)
+    for source_dir in "${source_directories[@]}"; do
+        local base_name
+        base_name=$(sanitize_basename "$source_dir")
+        local backup_path="${destination_directory}/${base_name}"
 
-    # List all backup directories sorted by modification time (oldest first)
-    mapfile -t backups < <(find "$destination_directory" -maxdepth 1 -mindepth 1 -type d -exec stat --format='%Y %n' {} + | sort -n | awk '{print $2}')
+        # Ensure that the backup directory for the source exists
+        if [ ! -d "$backup_path" ] || [ -z "$(ls -A "$backup_path")" ]; then
+            log_message "INFO" "No backups found for count-based retention in $backup_path."
+            continue
+        fi
 
-    # If the number of backups exceeds the retention count, delete the oldest ones
-    if [ "${#backups[@]}" -gt "$backup_retention_count" ]; then
-        for ((i=0; i<${#backups[@]}-"$backup_retention_count"; i++)); do
-            backup_dir="${backups[i]}"
-            log_message "INFO" "Removing old backup: $backup_dir"
+        # List all timestamped backup directories sorted by modification time (oldest first)
+        mapfile -t backups < <(find "$backup_path" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %p\n' | sort -n | awk '{print $2}')
 
-            # Perform safety checks for incremental backups
-            if [ "$rsync_type" = "incremental" ]; then
-                log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
-                if ! rsync -a --dry-run --delete "$backup_dir/" "$destination_directory/"; then
-                    log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
+        # Log the number of backups found for debugging
+        log_message "INFO" "Found ${#backups[@]} backups for $base_name, retention count is set to $backup_retention_count."
+
+        # If the number of backups exceeds the retention count, delete the oldest ones
+        if [ "${#backups[@]}" -gt "$backup_retention_count" ]; then
+            log_message "INFO" "Deleting excess backups for $base_name, keeping only the latest $backup_retention_count backups."
+            for ((i=0; i<${#backups[@]}-"$backup_retention_count"; i++)); do
+                backup_dir="${backups[i]}"
+                log_message "INFO" "Removing old backup: $backup_dir"
+                
+                # Perform safety checks for incremental backups
+                if [ "$rsync_type" = "incremental" ]; then
+                    log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
+                    if ! rsync -a --dry-run --delete "$backup_dir/" "$destination_directory/"; then
+                        log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
+                    else
+                        rm -rf "$backup_dir"
+                    fi
                 else
+                    # For mirrored backups, safe to simply remove
                     rm -rf "$backup_dir"
                 fi
-            else
-                # For mirrored backups, safe to simply remove
-                rm -rf "$backup_dir"
-            fi
-        done
-    else
-        log_message "INFO" "No excess backups found. Retention not required."
-    fi
+            done
+        else
+            log_message "INFO" "No excess backups found for $base_name. Retention not required."
+        fi
+    done
 }
 
 ####################
@@ -499,44 +516,56 @@ delete_old_backups_count_based() {
 # - Gracefully handles incremental backups by checking hard links.
 ####################
 delete_old_backups_storage_based() {
-    # Calculate the total storage used by backups in the destination directory, accounting for apparent size
-    current_storage=$(du --apparent-size -sb "$destination_directory" | awk '{print $1}')
+    for source_directory in "${source_directories[@]}"; do
+        local base_name
+        base_name=$(sanitize_basename "$source_directory")
+        backup_dirs="${destination_directory}/${base_name}"
 
-    # Convert the maximum allowed storage to bytes
-    max_storage_bytes=$(numfmt --from=iec "$backup_max_storage")
+        # Ensure destination directory exists and contains backups
+        if [ ! -d "$backup_dirs" ] || [ -z "$(ls -A "$backup_dirs")" ]; then
+            log_message "INFO" "No backups found for storage-based retention for $base_name."
+            continue
+        fi
 
-    # If current storage exceeds the maximum, start deleting old backups
-    if [ "$current_storage" -gt "$max_storage_bytes" ]; then
-        log_message "INFO" "Current storage ($current_storage bytes) exceeds the limit ($max_storage_bytes bytes). Removing older backups."
+        # Calculate the total storage used by backups in the destination directory, accounting for apparent size
+        current_storage=$(du --apparent-size -sb "$backup_dirs" | awk '{print $1}')
 
-    # List all backup directories sorted by modification time (oldest first)
-    mapfile -t backups < <(find "$destination_directory" -maxdepth 1 -mindepth 1 -type d -exec stat --format='%Y %n' {} + | sort -n | awk '{print $2}')
+        # Convert the maximum allowed storage to bytes
+        max_storage_bytes=$(numfmt --from=iec "$backup_max_storage")
 
-        # Start deleting the oldest backups until we fall below the limit
-        for backup_dir in "${backups[@]}"; do
-            log_message "INFO" "Removing backup: $backup_dir"
-            
-            if [ "$rsync_type" = "incremental" ]; then
-                log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
-                # Safely delete without breaking hard links in other backups
-                rm -rf "$backup_dir"
-            else
-                # For mirrored backups, safe to remove directly
-                rm -rf "$backup_dir"
-            fi
+        # If current storage exceeds the maximum, start deleting old backups
+        if [ "$current_storage" -gt "$max_storage_bytes" ]; then
+            log_message "INFO" "Current storage ($current_storage bytes) for $base_name exceeds the limit ($max_storage_bytes bytes). Removing older backups."
 
-            # Recalculate the storage usage after each deletion
-            current_storage=$(du --apparent-size -sb "$destination_directory" | awk '{print $1}')
-            
-            # Stop deleting if the storage is now within the limit
-            if [ "$current_storage" -le "$max_storage_bytes" ]; then
-                log_message "INFO" "Backup storage is now within the allowed limit."
-                break
-            fi
-        done
-    else
-        log_message "INFO" "Current storage ($current_storage bytes) is within the limit ($max_storage_bytes bytes). No deletion needed."
-    fi
+            # List all backup directories sorted by modification time (oldest first)
+            mapfile -t backups < <(find "$backup_dirs" -maxdepth 1 -mindepth 1 -type d -exec stat --format='%Y %n' {} + | sort -n | awk '{print $2}')
+
+            # Start deleting the oldest backups until we fall below the limit
+            for backup_dir in "${backups[@]}"; do
+                log_message "INFO" "Removing backup: $backup_dir"
+                
+                if [ "$rsync_type" = "incremental" ]; then
+                    log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
+                    # Safely delete without breaking hard links in other backups
+                    rm -rf "$backup_dir"
+                else
+                    # For mirrored backups, safe to remove directly
+                    rm -rf "$backup_dir"
+                fi
+
+                # Recalculate the storage usage after each deletion
+                current_storage=$(du --apparent-size -sb "$backup_dirs" | awk '{print $1}')
+                
+                # Stop deleting if the storage is now within the limit
+                if [ "$current_storage" -le "$max_storage_bytes" ]; then
+                    log_message "INFO" "Backup storage for $base_name is now within the allowed limit."
+                    break
+                fi
+            done
+        else
+            log_message "INFO" "Current storage ($current_storage bytes) for $base_name is within the limit ($max_storage_bytes bytes). No deletion needed."
+        fi
+    done
 }
 
 ####################
