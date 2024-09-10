@@ -26,7 +26,7 @@ source_directories=("/path/to/source/directory1" "/path/to/source/directory2") #
 # - In push mode: it's the remote destination.
 # - In pull mode: it's the local destination.
 ####################
-destination_directory="/path/to/destination/directory" # (e.g., "/mnt/backup")
+destination_directory="/path/to/destination/directory" # (e.g., "/mnt/backup/rsync")
 
 ####################
 # Rsync replication variables
@@ -61,19 +61,22 @@ remote_server="remote_server_address" # IP or hostname (e.g., 192.168.1.200)
 
 ####################
 # Retention Policy
-# - Choose the retention policy: time_based, count_based, or storage_based
-# - How long to keep backups
+# - Choose the retention policy: time, count, storage, or off.
+#   - time: Deletes backups older than a specified number of days.
+#   - count: Keeps only the latest X backups.
+#   - storage: Deletes older backups when storage approaches or exceeds a defined limit.
+#   - off: No backups are deleted.
 ####################
-retention_policy="storage"  # Choose from "time", "count", "storage", or "off".
-backup_retention_days=30  # Retain backups for this many days (time-based retention)
-backup_retention_count=7  # Retain only the last X backups (count-based retention)
-backup_max_storage="100G"  # Maximum allowed backup storage (storage-based retention)
+retention_policy="storage"  # Choose from "time", "count", "storage", or "off"
+backup_retention_days=30  # Maximum days for time-based retention
+backup_retention_count=7  # Maximum number for count-based retention
+backup_max_storage="100G"  # Maximum storage to be used for storage-based retention
 
 ####################
 # Log file for debugging
 # - Path where log messages will be saved.
 ####################
-log_file="/path/to/logfile.log" # Path to log file (e.g., /var/log/rsync_replication.log)
+log_file="/path/to/logfile.log" # Path to log file (e.g., /var/log/rsync_replication/rsync_replication.log)
 
 ####################
 # Main Script
@@ -266,8 +269,9 @@ pre_run_checks() {
 
 ####################
 # Function: sanitize_basename
-# - This function takes the source directory and checks if a basename conflict exists.
-# - If a conflict exists, it appends the immediate parent directory to make the basename unique.
+# - Generates a unique basename for the backup directory by checking for name conflicts.
+# - If a conflict exists, it appends the parent directory name to the basename.
+# - This ensures each source directory has a unique backup path.
 ####################
 sanitize_basename() {
     local source_directory="$1"
