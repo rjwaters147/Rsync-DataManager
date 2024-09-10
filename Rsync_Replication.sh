@@ -101,6 +101,18 @@ create_lockfile() {
 }
 
 ####################
+# Function: remove_lockfile
+# - Remove the lock file on normal exit.
+####################
+remove_lockfile() {
+    local lockfile="/tmp/backup_script.lock"
+    if [ -e "$lockfile" ]; then
+        rm -f "$lockfile"
+        log_message "INFO" "Lockfile removed."
+    fi
+}
+
+####################
 # Function: log_message
 # - This function logs messages with different log levels (INFO, ERROR, DEBUG).
 # - It creates the destination directory for the log file if it doesn't exist.
@@ -577,3 +589,4 @@ rotate_logs
 pre_run_checks
 run_for_each_source
 apply_retention_policy
+remove_lockfile
