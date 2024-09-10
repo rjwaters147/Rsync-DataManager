@@ -123,9 +123,7 @@ Should your backups be needed for any reason restoring data is easy.
 Simply just adjust the variables of the script as needed to push/pull data in the opposite direction you had originally configured it for.
 Just make sure you include the timestamped directory as the source like so:
 
-    ```
     source_directories=("/path/to/backup/source/2023-09-01_0000")
-    ```
 
 ## Logging and Monitoring
 
