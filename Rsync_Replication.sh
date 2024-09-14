@@ -336,7 +336,7 @@ rsync_replication() {
 
     # Determine if link-dest should be added for incremental backups
     if [ "$rsync_type" = "incremental" ]; then
-        previous_backup=$(find "${destination_directory}/${base_name}" -maxdepth 1 -type d | sort | tail -n 2 | head -n 1)
+        previous_backup=$(find "${destination_directory}/${base_name}" -maxdepth 1 -type d | sort | tail -n 1)
         if [ -n "$previous_backup" ]; then
             rsync_flags+=" --link-dest=${previous_backup}"
         fi
