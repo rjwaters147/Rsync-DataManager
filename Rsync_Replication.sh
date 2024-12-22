@@ -117,12 +117,11 @@ log_message() {
 rotate_logs() {
     log_message "INFO" "Rotating logs."
 
-    # Rename the current log with a timestamp, then compress it
+    # Rename the current log with a timestamp
     mv "$log_file" "${log_file}_$(date '+%Y%m%d%H%M%S')"
-    gzip "${log_file}_$(date '+%Y%m%d%H%M%S')"
 
     # Keep only the latest 7 log files
-    find "$(dirname "$log_file")" -name "$(basename "$log_file")*.gz" | sort -r | tail -n +8 | xargs rm -f
+    find "$(dirname "$log_file")" -name "$(basename "$log_file")*" | sort -r | tail -n +8 | xargs rm -f
 
     log_message "INFO" "Log rotation complete."
 }
@@ -587,8 +586,7 @@ run_for_each_source() {
 ####################
 # Main Script Execution
 ####################
-rotate_logs
 pre_run_checks
 run_for_each_source
 apply_retention_policy
-remove_lockfile
+rotate_logs
