@@ -86,36 +86,6 @@ log_file="/path/to/logfile.log" # Path to log file (e.g., /var/log/rsync_replica
 declare -A used_basenames
 
 ####################
-# Function: create_lockfile
-# - Create a lock file to ensure only one instance of the script is running.
-####################
-create_lockfile() {
-    local lockfile="/tmp/backup_script.lock"
-
-    if [ -e "$lockfile" ]; then
-        log_message "ERROR" "Script is already running (lock file exists). Exiting."
-        exit 1
-    fi
-
-    # Ensure the lock file is removed on script exit (normal or error)
-    trap 'rm -f "$lockfile"; exit' INT TERM EXIT
-
-    touch "$lockfile"
-}
-
-####################
-# Function: remove_lockfile
-# - Remove the lock file on normal exit.
-####################
-remove_lockfile() {
-    local lockfile="/tmp/backup_script.lock"
-    if [ -e "$lockfile" ]; then
-        rm -f "$lockfile"
-        log_message "INFO" "Lockfile removed."
-    fi
-}
-
-####################
 # Function: log_message
 # - This function logs messages with different log levels (INFO, ERROR, DEBUG).
 # - It creates the destination directory for the log file if it doesn't exist.
@@ -617,7 +587,6 @@ run_for_each_source() {
 ####################
 # Main Script Execution
 ####################
-create_lockfile
 rotate_logs
 pre_run_checks
 run_for_each_source
