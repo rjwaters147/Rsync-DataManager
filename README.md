@@ -7,10 +7,9 @@ This script automates the synchronization of files between a local system and a 
 - **Flexible Replication**: Supports both local-to-remote (push) and remote-to-local (pull) file synchronization.
 - **Incremental and Full Backups**: Choose between syncing only changed files (incremental) or performing a full copy of the data (mirror).
 - **Customizable Rsync Flags**: Modify short and long Rsync flags to tailor the transfer to your needs.
-- **Retention Policies**: Automatically manage old backups using time, count, or storage-based retention policies to prevent excessive storage usage.
+- **Retention Policies**: Automatically manage old backups using time, or count-based retention policies to prevent excessive storage usage.
 - **Log Rotation**: Compresses and rotates log files to prevent uncontrolled log growth.
 - **Automatic Directory Creation**: Automatically creates the destination directory if it doesn't exist.
-- **Concurrency Control**: Prevents multiple script instances from running simultaneously using lock files.
 - **Retry with Exponential Backoff**: Automatically retries failed Rsync operations with exponential backoff for transient network or I/O issues.
 
 ## Requirements
@@ -50,16 +49,14 @@ Edit the following settings in the script to suit your environment:
   - Example: `remote_server="192.168.1.100"`
 
 ### Retention Policies:
-- **Retention Policy**: Choose from `time`, `count`, `storage`, or `off` to manage old backups automatically.
-  - Example: `retention_policy="storage"`
+- **Retention Policy**: Choose from `time`, `count`, or `off` to manage old backups automatically.
+  - Example: `retention_policy="count"`
 - **Retention Settings**:
   - **Time-Based Retention**: Delete backups older than a specified number of days.
     - Example: `backup_retention_days=30`
   - **Count-Based Retention**: Keep only the last X backups.
-    - Example: `backup_retention_count=7`
-  - **Storage-Based Retention**: Delete old backups when storage exceeds a limit.
-    - Example: `backup_max_storage="100G"`
-
+    - Example: `backup_retention_count=10`
+  
 ### Logging:
 - **Log File Path**: Define where logs will be stored.
   - Example: `log_file="/path/to/logfile.log"`
