@@ -61,16 +61,14 @@ remote_server="remote_server_address" # IP or hostname (e.g., 192.168.1.200)
 
 ####################
 # Retention Policy
-# - Choose the retention policy: time, count, storage, or off.
+# - Choose the retention policy: time, count, or off.
 #   - time: Deletes backups older than a specified number of days.
 #   - count: Keeps only the latest X backups.
-#   - storage: Deletes older backups when storage approaches or exceeds a defined limit.
 #   - off: No backups are deleted.
 ####################
-retention_policy="storage"  # Choose from "time", "count", "storage", or "off"
+retention_policy="count"  # Choose from "time", "count", or "off"
 backup_retention_days=30  # Maximum days for time-based retention
-backup_retention_count=7  # Maximum number for count-based retention
-backup_max_storage="100G"  # Maximum storage to be used for storage-based retention
+backup_retention_count=10  # Maximum number for count-based retention
 
 ####################
 # Log file for debugging
@@ -215,11 +213,11 @@ pre_run_checks() {
     # Validate the retention policy
     check_retention_policy() {
         case "$retention_policy" in
-            time|count|storage|off)
+            time|count|off)
                 log_message "INFO" "Valid retention policy selected: $retention_policy"
                 ;;
             *)
-                log_message "ERROR" "Invalid retention policy '$retention_policy'. It must be one of: time, count, storage, or off."
+                log_message "ERROR" "Invalid retention policy '$retention_policy'. It must be one of: time, count, or off."
                 exit 1
                 ;;
         esac
@@ -484,64 +482,6 @@ delete_old_backups_count_based() {
 }
 
 ####################
-# Function: delete_old_backups_storage_based
-# - This function deletes old backups when storage exceeds the defined limit.
-# - Gracefully handles incremental backups by checking hard links.
-####################
-delete_old_backups_storage_based() {
-    for source_directory in "${source_directories[@]}"; do
-        local base_name
-        base_name=$(sanitize_basename "$source_directory")
-        backup_dirs="${destination_directory}/${base_name}"
-
-        # Ensure destination directory exists and contains backups
-        if [ ! -d "$backup_dirs" ] || [ -z "$(ls -A "$backup_dirs")" ]; then
-            log_message "INFO" "No backups found for storage-based retention for $base_name."
-            continue
-        fi
-
-        # Calculate the total storage used by backups in the destination directory, accounting for apparent size
-        current_storage=$(du --apparent-size -sb "$backup_dirs" | awk '{print $1}')
-
-        # Convert the maximum allowed storage to bytes
-        max_storage_bytes=$(numfmt --from=iec "$backup_max_storage")
-
-        # If current storage exceeds the maximum, start deleting old backups
-        if [ "$current_storage" -gt "$max_storage_bytes" ]; then
-            log_message "INFO" "Current storage ($current_storage bytes) for $base_name exceeds the limit ($max_storage_bytes bytes). Removing older backups."
-
-            # List all backup directories sorted by modification time (oldest first)
-            mapfile -t backups < <(find "$backup_dirs" -maxdepth 1 -mindepth 1 -type d -exec stat --format='%Y %n' {} + | sort -n | awk '{print $2}')
-
-            # Start deleting the oldest backups until we fall below the limit
-            for backup_dir in "${backups[@]}"; do
-                log_message "INFO" "Removing backup: $backup_dir"
-                
-                if [ "$rsync_type" = "incremental" ]; then
-                    log_message "INFO" "Performing safety checks for incremental backup deletion: $backup_dir"
-                    # Safely delete without breaking hard links in other backups
-                    rm -rf "$backup_dir"
-                else
-                    # For mirrored backups, safe to remove directly
-                    rm -rf "$backup_dir"
-                fi
-
-                # Recalculate the storage usage after each deletion
-                current_storage=$(du --apparent-size -sb "$backup_dirs" | awk '{print $1}')
-                
-                # Stop deleting if the storage is now within the limit
-                if [ "$current_storage" -le "$max_storage_bytes" ]; then
-                    log_message "INFO" "Backup storage for $base_name is now within the allowed limit."
-                    break
-                fi
-            done
-        else
-            log_message "INFO" "Current storage ($current_storage bytes) for $base_name is within the limit ($max_storage_bytes bytes). No deletion needed."
-        fi
-    done
-}
-
-####################
 # Function: apply_retention_policy
 # - This function applies the selected retention policy.
 ####################
@@ -558,11 +498,6 @@ apply_retention_policy() {
             log_message "INFO" "Starting count-based backup retention: retaining only the latest ${backup_retention_count} backups."
             delete_old_backups_count_based
             log_message "INFO" "Completed count-based backup retention."
-            ;;
-        storage)
-            log_message "INFO" "Starting storage-based backup retention: ensuring total backup storage does not exceed ${backup_max_storage}."
-            delete_old_backups_storage_based
-            log_message "INFO" "Completed storage-based backup retention."
             ;;
         off)
             log_message "INFO" "Retention Policy is turned off."
