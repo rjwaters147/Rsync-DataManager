@@ -19,37 +19,12 @@ source "${script_dir}/rsync_config.sh"
 ####################
 # Function: log_message
 # - Logs messages with a timestamp and log level.
-# - If use_syslog="yes", it sends messages to syslog/journald.
-# - Otherwise, it appends to the specified log_file.
 ####################
 log_message() {
-    local level="$1"    # Log level: INFO, ERROR, WARN, etc.
-    local message="$2"  # Log message content
+    local level="$1"
+    local message="$2"
 
-    if [ "$use_syslog" = "yes" ]; then
-        # Logging via syslog (journald, etc.)
-        logger -t "rsync_replication" -p "user.notice" "[${level}] ${message}"
-    else
-        # Logging to file
-        local log_dir
-        log_dir=$(dirname "$log_file")
-        if [ ! -d "$log_dir" ]; then
-            mkdir -p "$log_dir"
-        fi
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] ${message}" | tee -a "$log_file"
-    fi
-}
-
-####################
-# Function: rotate_logs
-# - Renames the current log with a timestamp.
-# - Prunes older rotated logs, keeping only the latest 7.
-####################
-rotate_logs() {
-    log_message "INFO" "Rotating logs."
-    mv "$log_file" "${log_file}_$(date '+%Y%m%d%H%M%S')"
-    find "$(dirname "$log_file")" -name "$(basename "$log_file")*" | sort -r | tail -n +8 | xargs rm -f
-    log_message "INFO" "Log rotation complete."
+    logger -t "rsync_replication" -p "user.notice" "[${level}] ${message}"
 }
 
 ####################
@@ -357,17 +332,14 @@ rsync_replication() {
             log_message "INFO" "Rsync attempt $((attempt+1)) of $rsync_retries..."
 
             if [ "$rsync_mode" = "push" ]; then
-                # push local→remote or local→local
                 if [ "$remote_replication" = "yes" ]; then
                     ssh "${remote_user}@${remote_server}" "mkdir -p \"${destination}\""
                     rsync $rsync_flags -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"
                     rsync_exit_code=$?
                 else
-                    # LOCAL PUSH: Atomic backup approach
                     mkdir -p "$(dirname "$destination")"
                     local temp_dest="${destination}.inprogress"
 
-                    # ---> Add the path to the tracking file
                     add_inprogress_dir "$temp_dest"
 
                     mkdir -p "$temp_dest"
@@ -376,16 +348,13 @@ rsync_replication() {
 
                     if [ $rsync_exit_code -eq 0 ]; then
                         mv "$temp_dest" "$destination"
-                        # ---> Remove from tracking after success
                         remove_inprogress_dir "$temp_dest"
                     else
                         rm -rf "$temp_dest"
-                        # ---> Remove from tracking after failure
                         remove_inprogress_dir "$temp_dest"
                     fi
                 fi
             else
-                # pull remote→local
                 if [ "$remote_replication" = "yes" ]; then
                     if ! ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\"" >/dev/null 2>&1; then
                         log_message "ERROR" "Source directory '$source_directory' does not exist on remote server."
@@ -394,7 +363,6 @@ rsync_replication() {
                     mkdir -p "$(dirname "$destination")"
                     local temp_dest="${destination}.inprogress"
 
-                    # ---> Add the path to the tracking file
                     add_inprogress_dir "$temp_dest"
 
                     mkdir -p "$temp_dest"
@@ -403,11 +371,9 @@ rsync_replication() {
 
                     if [ $rsync_exit_code -eq 0 ]; then
                         mv "$temp_dest" "$destination"
-                        # ---> Remove from tracking after success
                         remove_inprogress_dir "$temp_dest"
                     else
                         rm -rf "$temp_dest"
-                        # ---> Remove from tracking after failure
                         remove_inprogress_dir "$temp_dest"
                     fi
                 else
@@ -557,4 +523,3 @@ run_for_each_source() {
 pre_run_checks
 run_for_each_source
 apply_retention_policy
-rotate_logs

@@ -71,8 +71,7 @@ backup_retention_count=10 # Maximum number for count-based retention
 # Logging
 # - Path where log messages will be saved.
 ####################
-log_file="/path/to/logfile.log" # Optional if use_syslog is set to "yes"
-use_syslog="yes" # "yes" to send logs to syslog/journald, "no" to use log_file
+use_syslog="yes" # "yes" to send logs to syslog/journald, "no" to disable logging
 
 ####################
 # Command-Line Concurrency (for optional parallel runs)
