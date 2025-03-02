@@ -53,6 +53,27 @@ rotate_logs() {
 }
 
 ####################
+# Function: validate_path
+# - Checks a path for suspicious characters or patterns
+# - If invalid chars found, logs an error and exits.
+####################
+validate_path() {
+    local path="$1"
+
+    if [[ "$path" =~ [\"\';\|\(\)\&] ]]; then
+        log_message "ERROR" "Path '$path' contains invalid shell characters. Exiting."
+        exit 1
+    fi
+    if [[ "$path" =~ [[:space:]] ]]; then
+        log_message "WARN" "Path '$path' contains spaces. Ensure quoting is correct."
+    fi
+    if [[ -z "$path" ]]; then
+        log_message "ERROR" "Path is empty. Exiting."
+        exit 1
+    fi
+}
+
+####################
 # Function: pre_run_checks
 # - Validates environment before proceeding:
 #   1) Checks if required tools (rsync, ssh, etc.) are installed.
@@ -100,6 +121,7 @@ pre_run_checks() {
         # If push mode, check local existence of sources
         if [ "$rsync_mode" = "push" ]; then
             for src in "${source_directories[@]}"; do
+                validate_path "$src"
                 if [ ! -d "$src" ]; then
                     log_message "ERROR" "Source directory '$src' does not exist. Exiting."
                     exit 1
@@ -118,6 +140,7 @@ pre_run_checks() {
             log_message "ERROR" "No destination directory specified. Exiting."
             exit 1
         fi
+        validate_path "$destination_directory"
         if [ "$rsync_mode" = "pull" ] && [ ! -d "$destination_directory" ]; then
             log_message "INFO" "Destination directory '$destination_directory' does not exist locally. Creating it."
             mkdir -p "$destination_directory" || {
