@@ -48,19 +48,21 @@ log_message() {
 
 ####################
 # Function: validate_path
-# - Checks a path for suspicious characters or patterns
-# - If invalid chars found, logs an error and exits.
+# Checks a path for suspicious characters or patterns.
+# Logs an error and exits if invalid characters are found.
 ####################
 validate_path() {
     local path="$1"
 
-    if [[ "$path" =~ [\"\';\|\(\)\&] ]]; then
+    if printf '%s' "$path" | grep -Eq '[\"'"'"';|()&]'; then
         log_message "ERROR" "Path '$path' contains invalid shell characters. Exiting."
         exit 1
     fi
+
     if [[ "$path" =~ [[:space:]] ]]; then
         log_message "WARN" "Path '$path' contains spaces. Ensure quoting is correct."
     fi
+
     if [[ -z "$path" ]]; then
         log_message "ERROR" "Path is empty. Exiting."
         exit 1
