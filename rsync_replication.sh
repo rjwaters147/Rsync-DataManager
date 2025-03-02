@@ -18,13 +18,32 @@ source "${script_dir}/rsync_config.sh"
 
 ####################
 # Function: log_message
-# - Logs messages with a timestamp and log level.
+# - Logs messages at various levels to syslog, respecting a user-defined LOG_LEVEL.
+# - LOG_LEVEL is set in rsync_config.sh (DEBUG, INFO, WARN, ERROR).
 ####################
 log_message() {
     local level="$1"
     local message="$2"
 
-    logger -t "rsync_replication" -p "user.notice" "[${level}] ${message}"
+    local syslog_priority="user.notice"
+    case "$level" in
+        DEBUG) syslog_priority="user.debug" ;;
+        INFO)  syslog_priority="user.info"  ;;
+        WARN)  syslog_priority="user.warn"  ;;
+        ERROR) syslog_priority="user.err"   ;;
+        *)     syslog_priority="user.notice" ;;
+    esac
+
+    declare -A LEVEL_ORDER=( ["DEBUG"]=10 ["INFO"]=20 ["WARN"]=30 ["ERROR"]=40 )
+
+    : "${LOG_LEVEL:=INFO}"  # fallback if not set
+
+    local message_level_num="${LEVEL_ORDER[$level]:-20}"
+    local current_level_num="${LEVEL_ORDER[$LOG_LEVEL]:-20}"
+
+    if (( message_level_num >= current_level_num )); then
+        logger -t "rsync_replication" -p "$syslog_priority" "[${level}] ${message}"
+    fi
 }
 
 ####################

@@ -69,9 +69,20 @@ backup_retention_count=10 # Maximum number for count-based retention
 
 ####################
 # Logging
-# - Path where log messages will be saved.
+# - How log messages will be saved.
 ####################
 use_syslog="yes" # "yes" to send logs to syslog/journald, "no" to disable logging
+
+####################
+# Logging Level
+# - Supported: DEBUG, INFO, WARN, ERROR
+# - Controls which messages are actually logged by log_message().
+#   DEBUG: log everything
+#   INFO:  log INFO/WARN/ERROR
+#   WARN:  log WARN/ERROR
+#   ERROR: log only ERROR
+####################
+LOG_LEVEL="INFO"
 
 ####################
 # Command-Line Concurrency (for optional parallel runs)
