@@ -76,18 +76,29 @@ use_syslog="yes" # "yes" to send logs to syslog/journald, "no" to disable loggin
 ####################
 # Logging Level
 # - Supported: DEBUG, INFO, WARN, ERROR
-# - Controls which messages are actually logged by log_message().
 #   DEBUG: log everything
 #   INFO:  log INFO/WARN/ERROR
 #   WARN:  log WARN/ERROR
 #   ERROR: log only ERROR
 ####################
-LOG_LEVEL="INFO"
+LOG_LEVEL="INFO" # "DEBUG", "INFO", "WARN", or "ERROR"
 
 ####################
-# Command-Line Concurrency (for optional parallel runs)
+# Parallelization & Performance
+# - parallel: "yes" or "no"
+#   If set to "yes", the script uses GNU Parallel for concurrency.
+#   If set to "no", all backups run sequentially.
+#
+# - performance: "high", "medium", or "low"
+#   Controls how many system resources are used when parallel is "yes".
+#     high   => Max concurrency (e.g., one job per CPU core), minimal niceness.
+#     medium => Moderate concurrency, moderate niceness (some system load reduction).
+#     low    => Minimal concurrency, heavier niceness (least system impact).
 ####################
-concurrency=2
+parallel="yes"            # "yes" for GNU Parallel, "no" for single-threaded
+performance="low"         # "high", "medium", or "low"
+subfolder_threshold=3     # If a directory has more top-level subfolders than this number, each subfolder  will be processed separately
+file_chunk_threshold=1000 # If a directory contains more than this number of files, the script will split into multiple filelist chunks
 
 ####################
 # In-Progress Tracking

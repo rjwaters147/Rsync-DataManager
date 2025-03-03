@@ -4,22 +4,66 @@ set -euo pipefail  # Ensures the script exits on unhandled errors and no unset v
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # #   Script for Rsync to or from a remote server                                                                                           # #
-# #   This script is intended to be run alongside rsync_config.sh                                                                           # #
-# #   Contains advanced replication logic, logging, retries, atomic backups, and retention                                                  # #
+# #   Intended to be run with rsync_config.sh for user-adjustable settings                                                                  # #
+# #   Contains replication logic, logging, retries, atomic backups, and retention                                                           # #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 ####################
-# Source the configuration file
-# - The configuration file must define variables like source_directories, destination_directory, rsync_type, rsync_mode, etc.
-# - Make sure rsync_config.sh is in the same directory or adjust the path as needed.
+# Load configuration file
+# rsync_config.sh defines user-adjustable variables such as source_directories,
+# destination_directory, rsync_type, rsync_mode, parallel, etc.
 ####################
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_dir}/rsync_config.sh"
 
 ####################
+# Command-line argument variables
+# These flags and parameters control script flow per invocation.
+####################
+SINGLE_SOURCE=""
+SKIP_CHECKS="no"
+CHECKS_ONLY="no"
+RETENTION_ONLY="no"
+SOURCE_FILELIST=""
+BASE_DIR=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --source)
+            SINGLE_SOURCE="$2"
+            shift 2
+            ;;
+        --source-filelist)
+            SOURCE_FILELIST="$2"
+            shift 2
+            ;;
+        --base-dir)
+            BASE_DIR="$2"
+            shift 2
+            ;;
+        --skip-checks)
+            SKIP_CHECKS="yes"
+            shift
+            ;;
+        --checks-only)
+            CHECKS_ONLY="yes"
+            shift
+            ;;
+        --retention-only)
+            RETENTION_ONLY="yes"
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            exit 1
+            ;;
+    esac
+done
+
+####################
 # Function: log_message
-# - Logs messages at various levels to syslog, respecting a user-defined LOG_LEVEL.
-# - LOG_LEVEL is set in rsync_config.sh (DEBUG, INFO, WARN, ERROR).
+# Sends log messages at various levels (DEBUG, INFO, WARN, ERROR) to syslog.
+# Respects the LOG_LEVEL set in rsync_config.sh.
 ####################
 log_message() {
     local level="$1"
@@ -36,7 +80,7 @@ log_message() {
 
     declare -A LEVEL_ORDER=( ["DEBUG"]=10 ["INFO"]=20 ["WARN"]=30 ["ERROR"]=40 )
 
-    : "${LOG_LEVEL:=INFO}"  # fallback if not set
+    : "${LOG_LEVEL:=INFO}"  # Defaults to INFO if LOG_LEVEL is not set
 
     local message_level_num="${LEVEL_ORDER[$level]:-20}"
     local current_level_num="${LEVEL_ORDER[$LOG_LEVEL]:-20}"
@@ -48,19 +92,21 @@ log_message() {
 
 ####################
 # Function: validate_path
-# - Checks a path for suspicious characters or patterns
-# - If invalid chars found, logs an error and exits.
+# Checks a path for suspicious characters or patterns.
+# Logs an error and exits if invalid characters are found.
 ####################
 validate_path() {
     local path="$1"
 
-    if [[ "$path" =~ [\"\';\|\(\)\&] ]]; then
+    if printf '%s' "$path" | grep -Eq '[\"'"'"';|()&]'; then
         log_message "ERROR" "Path '$path' contains invalid shell characters. Exiting."
         exit 1
     fi
+
     if [[ "$path" =~ [[:space:]] ]]; then
         log_message "WARN" "Path '$path' contains spaces. Ensure quoting is correct."
     fi
+
     if [[ -z "$path" ]]; then
         log_message "ERROR" "Path is empty. Exiting."
         exit 1
@@ -69,29 +115,38 @@ validate_path() {
 
 ####################
 # Function: pre_run_checks
-# - Validates environment before proceeding:
-#   1) Checks if required tools (rsync, ssh, etc.) are installed.
-#   2) Ensures rsync_type and rsync_mode are valid.
-#   3) Verifies that source and destination directories exist (depending on mode).
-#   4) Checks SSH connectivity if remote replication is enabled.
-#   5) Validates the retention policy configuration.
+# Validates environment before running:
+#   1) Verifies required tools (rsync, ssh, etc.)
+#   2) Checks rsync_type and rsync_mode
+#   3) Ensures source/destination directories exist (depending on mode)
+#   4) Confirms SSH connectivity if remote replication is enabled
+#   5) Verifies chosen retention policy
 ####################
 pre_run_checks() {
 
     ####################
-    # Check required tools
+    # Checks if required tools are installed
     ####################
     check_required_tools() {
+        # Basic tools for any replication
         for tool in rsync du numfmt ssh logger flock; do
             if ! command -v "$tool" >/dev/null 2>&1; then
                 log_message "ERROR" "Required tool '$tool' is not installed. Exiting."
                 exit 1
             fi
         done
+
+        # Check for GNU Parallel
+        if [[ "$parallel" == "yes" ]]; then
+            if ! command -v parallel >/dev/null 2>&1; then
+                log_message "ERROR" "GNU Parallel is not installed but parallel mode is enabled. Exiting."
+                exit 1
+            fi
+        fi
     }
 
     ####################
-    # Check rsync options
+    # Checks if rsync_type and rsync_mode are valid
     ####################
     check_rsync_options() {
         if [[ "$rsync_type" != "incremental" && "$rsync_type" != "mirror" ]]; then
@@ -105,14 +160,14 @@ pre_run_checks() {
     }
 
     ####################
-    # Check source directories
+    # Checks source directories
+    # In push mode, source directories must exist locally.
     ####################
     check_source_directories() {
         if [ "${#source_directories[@]}" -eq 0 ]; then
             log_message "ERROR" "No source directories specified. Exiting."
             exit 1
         fi
-        # If push mode, check local existence of sources
         if [ "$rsync_mode" = "push" ]; then
             for src in "${source_directories[@]}"; do
                 validate_path "$src"
@@ -127,7 +182,8 @@ pre_run_checks() {
     }
 
     ####################
-    # Check destination directory
+    # Checks destination directory
+    # In pull mode, creates the directory if it does not exist.
     ####################
     check_destination_directory() {
         if [ -z "$destination_directory" ]; then
@@ -145,7 +201,7 @@ pre_run_checks() {
     }
 
     ####################
-    # Check SSH connection if remote_replication = yes
+    # Checks SSH connection if remote_replication="yes"
     ####################
     check_ssh_connection() {
         if [ "$remote_replication" = "yes" ]; then
@@ -166,7 +222,7 @@ pre_run_checks() {
     }
 
     ####################
-    # Check retention policy
+    # Checks retention policy validity
     ####################
     check_retention_policy() {
         case "$retention_policy" in
@@ -192,8 +248,8 @@ pre_run_checks() {
 
 ####################
 # Basename conflict handling
-# - Ensures each source directory produces a unique name in the backup destination.
-# - If conflicts occur, appends the parent directory to the base name.
+# Ensures each source directory produces a unique backup name.
+# If conflicts occur, appends the parent directory name to the base name.
 ####################
 declare -A used_basenames
 sanitize_basename() {
@@ -201,7 +257,6 @@ sanitize_basename() {
     local base_name
     base_name=$(basename "$source_directory")
 
-    # Instead of: if [[ -n "${used_basenames[$base_name]}" ]]; then
     if [[ "${used_basenames[$base_name]+exists}" == "exists" ]]; then
         local parent_dir
         parent_dir=$(basename "$(dirname "$source_directory")")
@@ -214,14 +269,12 @@ sanitize_basename() {
 
 ####################
 # Function: check_disk_space_local
-# - Verifies adequate free space before backup if destination is local.
-# - Uses du and df to compare the size of source vs available space.
+# Ensures adequate local free space if remote_replication="no" or if rsync_mode="pull".
 ####################
 check_disk_space_local() {
     local source_path="$1"
     local destination_path="$2"
 
-    # If the operation is local (remote_replication=no) or pull mode, we can reliably check disk usage
     if [ "$remote_replication" = "no" ] || [ "$rsync_mode" = "pull" ]; then
         if [ -d "$source_path" ] && [ -d "$destination_path" ]; then
             local required
@@ -237,9 +290,8 @@ check_disk_space_local() {
 }
 
 ####################
-# Function: add_inprogress_dir
-# - Appends the directory path to partial_inprogress_list_file.
-# - Uses flock for concurrency safety (optional).
+# Adds a directory path to partial_inprogress_list_file.
+# Locks the file to prevent race conditions.
 ####################
 add_inprogress_dir() {
     local dir="$1"
@@ -250,9 +302,8 @@ add_inprogress_dir() {
 }
 
 ####################
-# Function: remove_inprogress_dir
-# - Removes the specified directory from partial_inprogress_list_file.
-# - Also uses flock to avoid race conditions.
+# Removes a directory path from partial_inprogress_list_file.
+# Also uses flock to avoid race conditions.
 ####################
 remove_inprogress_dir() {
     local dir="$1"
@@ -265,8 +316,8 @@ remove_inprogress_dir() {
 }
 
 ####################
-# Cleanup leftover .inprogress directories on interrupt
-# - Reads partial_inprogress_list_file, removes directories, clears the file.
+# Cleanup on interrupt (SIGINT, SIGTERM)
+# Reads partial_inprogress_list_file, removes directories, clears the file.
 ####################
 cleanup_function() {
     log_message "WARN" "Caught interrupt signal. Cleaning up leftover .inprogress directories..."
@@ -281,7 +332,6 @@ cleanup_function() {
                 fi
             done < "$partial_inprogress_list_file"
 
-            # Clear the file so leftover entries aren't repeated
             : > "$partial_inprogress_list_file"
         } 200>>"$partial_inprogress_list_file"
     fi
@@ -291,19 +341,71 @@ cleanup_function() {
 trap 'cleanup_function' INT TERM
 
 ####################
-# Function: rsync_replication
-# - Handles push/pull logic, incremental vs mirror.
-# - Implements retry logic and atomic backups (.inprogress → final).
+# rsync_replication_filelist
+# Copies files from a relative file list (filelist) under base_dir.
+# Uses --relative to recreate the full subfolder structure in the destination.
+####################
+rsync_replication_filelist() {
+    local filelist="$1"
+    local base_dir="$2"
+    local rsync_exit_code=0
+
+    local base_name
+    base_name=$(basename "$base_dir")
+
+    local backup_date
+    local destination
+    if [ "$rsync_type" = "incremental" ]; then
+        backup_date=$(date +%Y-%m-%d_%H%M)
+        destination="${destination_directory}/${base_name}/${backup_date}"
+    else
+        destination="${destination_directory}/${base_name}"
+    fi
+
+    local rsync_flags
+    if [ "$remote_replication" = "yes" ]; then
+        rsync_flags="$remote_rsync_short_args $remote_rsync_long_args"
+    else
+        rsync_flags="$local_rsync_short_args $local_rsync_long_args"
+    fi
+
+    log_message "INFO" "Executing rsync with --files-from='$filelist', --relative, base_dir='$base_dir' => '$destination'"
+
+    mkdir -p "$(dirname "$destination")"
+    local temp_dest="${destination}.inprogress"
+    mkdir -p "$temp_dest"
+    add_inprogress_dir "$temp_dest"
+
+    # --relative ensures subfolders are reconstructed in temp_dest
+    rsync $rsync_flags --files-from="$filelist" --relative "$base_dir" "$temp_dest/"
+    rsync_exit_code=$?
+
+    if [ $rsync_exit_code -eq 0 ]; then
+        mv "$temp_dest" "$destination"
+        remove_inprogress_dir "$temp_dest"
+        log_message "INFO" "Filelist replication succeeded for base_dir='$base_dir'."
+    else
+        rm -rf "$temp_dest"
+        remove_inprogress_dir "$temp_dest"
+        log_message "ERROR" "Filelist replication failed with exit code $rsync_exit_code."
+    fi
+
+    return $rsync_exit_code
+}
+
+####################
+# rsync_replication
+# Handles local or remote push/pull replication, including retries, atomic backups, and link-dest for incremental.
 ####################
 rsync_replication() {
     local source_directory="$1"
-    local base_name
-    local backup_date
-    local destination
     local rsync_exit_code=0
 
+    local base_name
     base_name=$(sanitize_basename "$source_directory")
 
+    local backup_date
+    local destination
     if [ "$rsync_type" = "incremental" ]; then
         backup_date=$(date +%Y-%m-%d_%H%M)
         destination="${destination_directory}/${base_name}/${backup_date}"
@@ -319,12 +421,13 @@ rsync_replication() {
     fi
 
     if [ -d "${destination_directory}/${base_name}" ]; then
+        local previous_backup
         previous_backup=$(find "${destination_directory}/${base_name}" -maxdepth 1 -type d | sort | tail -n 1)
         if [ -n "$previous_backup" ] && [ "$previous_backup" != "${destination_directory}/${base_name}" ]; then
             rsync_flags+=" --link-dest=${previous_backup}"
         fi
     else
-        log_message "INFO" "No previous backups found (destination directory does not exist yet). Skipping --link-dest."
+        log_message "INFO" "No previous backups found at '${destination_directory}/${base_name}'. Skipping --link-dest."
     fi
 
     check_disk_space_local "$source_directory" "$(dirname "$destination")"
@@ -336,6 +439,10 @@ rsync_replication() {
     local backoff=1
     local max_backoff=60
 
+    ####################
+    # is_retryable_exit_code
+    # Checks if the rsync exit code is in the retryable list
+    ####################
     is_retryable_exit_code() {
         local code="$1"
         for ec in "${retryable_exit_codes[@]}"; do
@@ -346,11 +453,16 @@ rsync_replication() {
         return 1
     }
 
+    ####################
+    # run_rsync_with_retries
+    # Attempts rsync up to rsync_retries times, with exponential backoff for retryable errors.
+    ####################
     run_rsync_with_retries() {
         while [ "$attempt" -lt "$rsync_retries" ]; do
             log_message "INFO" "Rsync attempt $((attempt+1)) of $rsync_retries..."
 
             if [ "$rsync_mode" = "push" ]; then
+                # Local or remote push
                 if [ "$remote_replication" = "yes" ]; then
                     ssh "${remote_user}@${remote_server}" "mkdir -p \"${destination}\""
                     rsync $rsync_flags -e ssh "${source_directory}/" "${remote_user}@${remote_server}:${destination}/"
@@ -374,6 +486,7 @@ rsync_replication() {
                     fi
                 fi
             else
+                # Pull mode
                 if [ "$remote_replication" = "yes" ]; then
                     if ! ssh "${remote_user}@${remote_server}" "ls \"${source_directory}\"" >/dev/null 2>&1; then
                         log_message "ERROR" "Source directory '$source_directory' does not exist on remote server."
@@ -408,7 +521,7 @@ rsync_replication() {
                 log_message "WARN" "Rsync attempt $((attempt+1)) failed with exit code $rsync_exit_code (retryable)."
                 attempt=$((attempt + 1))
                 if [ "$attempt" -lt "$rsync_retries" ]; then
-                    log_message "INFO" "Retrying in $backoff seconds (exponential backoff)."
+                    log_message "INFO" "Sleeping $backoff seconds before retry."
                     sleep "$backoff"
                     backoff=$((backoff * 2))
                     if [ "$backoff" -gt "$max_backoff" ]; then
@@ -429,9 +542,9 @@ rsync_replication() {
 }
 
 ####################
-# Function: delete_old_backups_time_based
-# - Removes backups older than backup_retention_days
-# - For incremental: runs safety checks to ensure hard links are not broken.
+# delete_old_backups_time_based
+# Removes backups older than backup_retention_days.
+# For incremental backups, performs a dry-run safety check.
 ####################
 delete_old_backups_time_based() {
     for src in "${source_directories[@]}"; do
@@ -463,9 +576,9 @@ delete_old_backups_time_based() {
 }
 
 ####################
-# Function: delete_old_backups_count_based
-# - Retains only the latest backup_retention_count directories for each source.
-# - If incremental, also performs safety checks before deleting.
+# delete_old_backups_count_based
+# Retains only the latest backup_retention_count directories for each source.
+# For incremental backups, runs a safety check before deletion.
 ####################
 delete_old_backups_count_based() {
     for src in "${source_directories[@]}"; do
@@ -482,12 +595,12 @@ delete_old_backups_count_based() {
         log_message "INFO" "Found ${#backups[@]} backups for $base_name. Retention count is $backup_retention_count."
 
         if [ "${#backups[@]}" -gt "$backup_retention_count" ]; then
-            log_message "INFO" "Deleting excess backups; keeping only the latest $backup_retention_count."
+            log_message "INFO" "Deleting excess backups; retaining only the latest $backup_retention_count."
             for ((i=0; i<${#backups[@]}-"$backup_retention_count"; i++)); do
                 local backup_dir="${backups[i]}"
                 log_message "INFO" "Removing old backup: $backup_dir"
                 if [ "$rsync_type" = "incremental" ]; then
-                    log_message "INFO" "Safety checks for incremental backup deletion."
+                    log_message "INFO" "Performing safety checks for incremental backup deletion."
                     if ! rsync -a --dry-run --delete "$backup_dir/" "$backup_path/"; then
                         log_message "ERROR" "Safety check failed for incremental backup. Not deleting: $backup_dir"
                     else
@@ -504,8 +617,8 @@ delete_old_backups_count_based() {
 }
 
 ####################
-# Function: apply_retention_policy
-# - Dispatches to the appropriate retention strategy (time, count, off).
+# apply_retention_policy
+# Chooses the correct retention strategy (time, count, or off).
 ####################
 apply_retention_policy() {
     log_message "INFO" "Applying retention policy: $retention_policy"
@@ -519,14 +632,14 @@ apply_retention_policy() {
             delete_old_backups_count_based
             ;;
         off)
-            log_message "INFO" "Retention policy disabled. No old backups will be deleted."
+            log_message "INFO" "Retention policy is off. No backups will be deleted."
             ;;
     esac
 }
 
 ####################
-# Function: run_for_each_source
-# - Iterates through all source_directories and runs rsync_replication on each.
+# run_for_each_source
+# Iterates through source_directories and calls rsync_replication for each.
 ####################
 run_for_each_source() {
     for src in "${source_directories[@]}"; do
@@ -537,8 +650,35 @@ run_for_each_source() {
 }
 
 ####################
-# Main Execution
+# Main Execution Flow
+# Checks arguments (CHECKS_ONLY, RETENTION_ONLY, etc.) and runs the appropriate functions.
 ####################
-pre_run_checks
-run_for_each_source
-apply_retention_policy
+if [[ "$CHECKS_ONLY" == "yes" ]]; then
+    pre_run_checks
+    exit 0
+fi
+
+if [[ "$SKIP_CHECKS" != "yes" ]]; then
+    pre_run_checks
+fi
+
+if [[ "$RETENTION_ONLY" == "yes" ]]; then
+    apply_retention_policy
+    exit 0
+fi
+
+if [[ -n "$SOURCE_FILELIST" && -n "$BASE_DIR" ]]; then
+    rsync_replication_filelist "$SOURCE_FILELIST" "$BASE_DIR"
+    apply_retention_policy
+    exit 0
+fi
+
+if [[ -n "$SINGLE_SOURCE" ]]; then
+    rsync_replication "$SINGLE_SOURCE"
+    apply_retention_policy
+    exit 0
+else
+    run_for_each_source
+    apply_retention_policy
+    exit 0
+fi
